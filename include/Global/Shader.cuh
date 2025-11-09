@@ -7,7 +7,7 @@
 namespace project {
     //几何体类型
     typedef enum class GeometryType {
-        SPHERE, TRIANGLE
+        SPHERE, TRIANGLE, PARTICLE
     } GeometryType;
 
     //材质类型

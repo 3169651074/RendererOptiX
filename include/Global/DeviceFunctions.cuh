@@ -130,7 +130,7 @@ namespace project {
             }
         } Matrix;
 
-        __host__ __device__ void constructTransformMatrix(
+        __host__ __device__ static void constructTransformMatrix(
                 const float3 & shift, const float3 & rotate, const float3 & scale, float * result)
         {
             //分别构造SRT矩阵

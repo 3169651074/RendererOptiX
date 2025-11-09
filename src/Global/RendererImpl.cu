@@ -33,7 +33,7 @@ namespace project {
         context = nullptr;
     }
 
-    std::pair<OptixTraversableHandle, CUdeviceptr> buildGASForSpheres(OptixDeviceContext & context, const std::vector<Sphere> & spheres) {
+    GAS buildGASForSpheres(OptixDeviceContext & context, const std::vector<Sphere> & spheres) {
         SDL_Log("Building GAS for spheres...");
 
         //GAS为静态，无需更新，则设置为可压缩且高质量
@@ -116,7 +116,7 @@ namespace project {
         SDL_Log("GAS for spheres built.");
         return {handle, dev_output};
     }
-    std::pair<OptixTraversableHandle, CUdeviceptr> buildGASForTriangles(OptixDeviceContext & context, const std::vector<Triangle> & triangles) {
+    GAS buildGASForTriangles(OptixDeviceContext & context, const std::vector<Triangle> & triangles) {
         SDL_Log("Building GAS for triangles...");
 
         const OptixAccelBuildOptions buildOptions = {
@@ -206,28 +206,48 @@ namespace project {
         SDL_Log("GAS for triangles built.");
         return {handle, dev_output};
     }
-    void cleanupAccelerationStructure(std::pair<OptixTraversableHandle, CUdeviceptr> & data) {
+    void cleanupAccelerationStructure(GAS & data) {
         std::vector vector = {data};
         cleanupAccelerationStructure(vector);
         data = {};
     }
-    void cleanupAccelerationStructure(std::vector<std::pair<OptixTraversableHandle, CUdeviceptr>> & data) {
+    void cleanupAccelerationStructure(std::vector<GAS> & data) {
         for (auto & item: data) {
             cudaCheckError(cudaFree(reinterpret_cast<void *>(item.second)));
         }
         data = {};
     }
+    void cleanupAccelerationStructure(IAS & data) {
+        std::vector vector = {data};
+        cleanupAccelerationStructure(vector);
+        data = {};
+    }
+    void cleanupAccelerationStructure(std::vector<IAS> & data) {
+        for (auto & item : data) {
+            const auto & [handle, ptr, _] = item;
+            cudaCheckError(cudaFree(reinterpret_cast<void *>(ptr)));
+        }
+        data = {};
+    }
 
-    OptixInstance * createInstances(const std::vector<std::pair<OptixTraversableHandle, size_t>> & data) {
+    OptixInstance * createInstances(const std::vector<GAS> & data) {
         SDL_Log("Creating instances...");
 
         //在主机端初始化实例
         const size_t instanceCount = data.size();
         std::vector<OptixInstance> instances(instanceCount);
+
+        float transform[12];
+        MathHelper::constructTransformMatrix(
+                {0.0, 0.0, 0.0},
+                {0.0, 0.0, 0.0},
+                {1.0, 1.0, 1.0}, transform);
+
         for (size_t i = 0; i < instanceCount; i++) {
             auto & instance = instances[i];
+            memcpy(instance.transform, transform, 12 * sizeof(float));
             instance.instanceId = 0;
-            instance.sbtOffset = data[i].second;
+            instance.sbtOffset = 0;
             instance.visibilityMask = 1;
             instance.flags = OPTIX_INSTANCE_FLAG_NONE;
             instance.traversableHandle = data[i].first;
@@ -249,9 +269,7 @@ namespace project {
         dev_instances = nullptr;
     }
 
-    std::tuple<OptixTraversableHandle, CUdeviceptr, OptixAccelBufferSizes> buildIAS(
-            OptixDeviceContext & context, const OptixInstance * dev_instances, size_t instanceCount)
-    {
+    IAS buildIAS(OptixDeviceContext & context, const OptixInstance * dev_instances, size_t instanceCount) {
         //构建输入，允许更新且高性能
         const OptixAccelBuildOptions buildOptions = {
                 .buildFlags = OPTIX_BUILD_FLAG_ALLOW_UPDATE | OPTIX_BUILD_FLAG_PREFER_FAST_BUILD,
@@ -260,7 +278,7 @@ namespace project {
         const OptixBuildInput buildInput = {
                 .type = OPTIX_BUILD_INPUT_TYPE_INSTANCES,
                 .instanceArray = {
-                        .instances = reinterpret_cast<CUdeviceptr>(dev_instances),
+                        .instances = reinterpret_cast<CUdeviceptr>(dev_instances), //实例数组已经存在于设备内存中
                         .numInstances = static_cast<unsigned int>(instanceCount)
                 }
         };
@@ -282,10 +300,7 @@ namespace project {
 
         return {handle, dev_output, bufferSizes};
     }
-    void updateIAS(
-            OptixDeviceContext & context, std::tuple<OptixTraversableHandle, CUdeviceptr, OptixAccelBufferSizes> & ias,
-            const OptixInstance * dev_instances, size_t instanceCount)
-    {
+    void updateIAS(OptixDeviceContext & context, IAS & ias, const OptixInstance * dev_instances, size_t instanceCount) {
         const OptixAccelBuildOptions buildOptions = {
                 .buildFlags = OPTIX_BUILD_FLAG_ALLOW_UPDATE | OPTIX_BUILD_FLAG_PREFER_FAST_BUILD, //flags需要保持和构建时一致
                 .operation = OPTIX_BUILD_OPERATION_UPDATE   //更新
@@ -395,7 +410,7 @@ namespace project {
         OptixProgramGroup missProgramGroup = nullptr;
         const OptixProgramGroupDesc missProgramDesc = {
                 .kind = OPTIX_PROGRAM_GROUP_KIND_MISS,
-                .miss = {.module = modules[0], .entryFunctionName = "__miss__missProgram_06"}
+                .miss = {.module = modules[0], .entryFunctionName = "__miss__missProgram"}
         };
         optixCheckError(optixProgramGroupCreate(
                 context, &missProgramDesc,
@@ -542,20 +557,41 @@ namespace project {
         ptrs.push_back(dev_missRecord);
 
         //hit
-        const auto spheres = geoData.spheres;
-        const auto triangles = geoData.triangles;
-        const auto roughs = matData.roughs;
-        const auto metals = matData.metals;
-
+        const auto & spheres = geoData.spheres;
+        const auto & triangles = geoData.triangles;
+        const auto & particles = geoData.particles;
+        const auto & roughs = matData.roughs;
+        const auto & metals = matData.metals;
         std::vector<HitGroupSbtRecord> hitGroupSbtRecords;
 
-        //hit - sphere
-        SDL_Log("Creating closesthit - sphere record...");
+        //为所有球体的中心和半径分配设备内存
+        const size_t sphereCount = spheres.size();
+        std::vector<float3> sphereCenters(sphereCount);
+        std::vector<float> sphereRadii(sphereCount);
+        for (size_t i = 0; i < sphereCount; i++) {
+            sphereCenters[i] = spheres[i].center;
+            sphereRadii[i] = spheres[i].radius;
+        }
+
+        CUdeviceptr dev_sphereCenters = 0;
+        CUdeviceptr dev_sphereRadii = 0;
+        cudaCheckError(cudaMalloc(reinterpret_cast<void **>(&dev_sphereCenters), sphereCount * sizeof(float3)));
+        cudaCheckError(cudaMalloc(reinterpret_cast<void **>(&dev_sphereRadii), sphereCount * sizeof(float)));
+        cudaCheckError(cudaMemcpy(reinterpret_cast<void *>(dev_sphereCenters), sphereCenters.data(), sphereCount * sizeof(float3), cudaMemcpyHostToDevice));
+        cudaCheckError(cudaMemcpy(reinterpret_cast<void *>(dev_sphereRadii), sphereRadii.data(), sphereCount * sizeof(float), cudaMemcpyHostToDevice));
+        ptrs.push_back(dev_sphereCenters);
+        ptrs.push_back(dev_sphereRadii);
+
         for (size_t i = 0; i < spheres.size(); i++) {
             const auto & item = spheres[i];
             HitGroupSbtRecord record = {.data = {
                     GeometryType::SPHERE, item.materialType
             }};
+
+            //设置球体中心和半径指针（所有记录共享同一指针，因为使用primitiveIndex访问）
+            record.data.sphere.centers = reinterpret_cast<float3 *>(dev_sphereCenters);
+            record.data.sphere.radii = reinterpret_cast<float *>(dev_sphereRadii);
+
             switch (spheres[i].materialType) {
                 case MaterialType::ROUGH: //sphere - rough
                     optixCheckError(optixSbtRecordPackHeader(
@@ -575,12 +611,79 @@ namespace project {
 
         //hit - triangle
         SDL_Log("Creating closesthit - triangle record...");
+
+        // 为所有三角形的顶点法线分配设备内存
+        size_t triangleCount = triangles.size();
+        size_t vertexNormalCount = triangleCount * 3;
+        std::vector<float3> vertexNormals(vertexNormalCount);
+        for (size_t i = 0; i < triangleCount; i++) {
+            vertexNormals[i * 3 + 0] = triangles[i].normals[0];
+            vertexNormals[i * 3 + 1] = triangles[i].normals[1];
+            vertexNormals[i * 3 + 2] = triangles[i].normals[2];
+        }
+
+        CUdeviceptr dev_vertexNormals = 0;
+        cudaCheckError(cudaMalloc(reinterpret_cast<void **>(&dev_vertexNormals), vertexNormalCount * sizeof(float3)));
+        cudaCheckError(cudaMemcpy(reinterpret_cast<void *>(dev_vertexNormals), vertexNormals.data(), vertexNormalCount * sizeof(float3), cudaMemcpyHostToDevice));
+        ptrs.push_back(dev_vertexNormals);
+
         for (size_t i = 0; i < triangles.size(); i++) {
             const auto & item = triangles[i];
             HitGroupSbtRecord record = {.data = {
                     GeometryType::TRIANGLE, item.materialType
             }};
+
+            //设置顶点法线指针（所有记录共享同一指针）
+            record.data.triangles.vertexNormals = reinterpret_cast<float3 *>(dev_vertexNormals);
+
             switch (triangles[i].materialType) {
+                case MaterialType::ROUGH: //triangle - rough
+                    optixCheckError(optixSbtRecordPackHeader(
+                            programGroups[4], &record));
+                    record.data.rough.albedo = roughs[item.materialIndex].albedo;
+                    break;
+                case MaterialType::METAL: //triangle - metal
+                    optixCheckError(optixSbtRecordPackHeader(
+                            programGroups[5], &record));
+                    record.data.metal.albedo = metals[item.materialIndex].albedo;
+                    record.data.metal.fuzz = metals[item.materialIndex].fuzz;
+                    break;
+                default:;
+            }
+            hitGroupSbtRecords.push_back(record);
+        }
+
+        //hit - particle
+        //不同于三角形，此处为粒子对象中一组三角形创建一个记录，即每个粒子一条记录
+        SDL_Log("Creating closesthit - particle record...");
+        for (size_t i = 0; i < particles.size(); i++) {
+            const auto & item = particles[i];
+
+            //为当前粒子的顶点法线分配设备内存
+            triangleCount = item.triangles.size();
+            vertexNormalCount = triangleCount * 3;
+            vertexNormals.clear();
+            vertexNormals.resize(vertexNormalCount);
+
+            //由于item.triangles中已经包含了交换后的数据，直接使用即可
+            for (size_t j = 0; j < triangleCount; j++) {
+                vertexNormals[j * 3 + 0] = item.triangles[j].normals[0];
+                vertexNormals[j * 3 + 1] = item.triangles[j].normals[1];
+                vertexNormals[j * 3 + 2] = item.triangles[j].normals[2];
+            }
+            dev_vertexNormals = 0;
+            cudaCheckError(cudaMalloc(reinterpret_cast<void **>(&dev_vertexNormals), vertexNormalCount * sizeof(float3)));
+            cudaCheckError(cudaMemcpy(reinterpret_cast<void *>(dev_vertexNormals), vertexNormals.data(), vertexNormalCount * sizeof(float3), cudaMemcpyHostToDevice));
+            ptrs.push_back(dev_vertexNormals); //保存指针以便后续释放。由于添加到数组中，无需单独释放此内存
+
+            HitGroupSbtRecord record = {.data = {
+                    //GeometryType用于着色，保持三角形不变
+                    GeometryType::TRIANGLE, item.materialType
+            }};
+            // 设置顶点法线指针
+            record.data.triangles.vertexNormals = reinterpret_cast<float3 *>(dev_vertexNormals);
+
+            switch (particles[i].materialType) {
                 case MaterialType::ROUGH: //triangle - rough
                     optixCheckError(optixSbtRecordPackHeader(
                             programGroups[4], &record));
