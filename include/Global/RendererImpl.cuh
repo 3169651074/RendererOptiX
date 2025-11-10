@@ -28,7 +28,10 @@ namespace project {
         MaterialType materialType;
         size_t materialIndex;
 
+        //粒子的三角形数组
         std::vector<Triangle> triangles;
+        //粒子的速度
+        float3 velocity;
     } Particle;
 
     //材质类型

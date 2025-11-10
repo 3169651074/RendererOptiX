@@ -34,7 +34,7 @@ namespace project {
     }
 
     GAS buildGASForSpheres(OptixDeviceContext & context, const std::vector<Sphere> & spheres) {
-        SDL_Log("Building GAS for spheres...");
+        //SDL_Log("Building GAS for spheres...");
 
         //GAS为静态，无需更新，则设置为可压缩且高质量
         const OptixAccelBuildOptions buildOptions = {
@@ -107,7 +107,7 @@ namespace project {
         unsigned long long compressedSize = 0;
         cudaCheckError(cudaMemcpy(reinterpret_cast<void *>(&compressedSize), reinterpret_cast<void *>(dev_compressedSize), sizeof(unsigned long long), cudaMemcpyDeviceToHost));
         if (compressedSize < bufferSizes.outputSizeInBytes) {
-            SDL_Log("Compressing GAS: %zd --> %zd.", bufferSizes.outputSizeInBytes, compressedSize);
+            //SDL_Log("Compressing GAS: %zd --> %zd.", bufferSizes.outputSizeInBytes, compressedSize);
 
             //重新分配空间
             CUdeviceptr dev_compressedGasOutput = 0;
@@ -122,14 +122,14 @@ namespace project {
             cudaCheckError(cudaFree(reinterpret_cast<void *>(dev_output)));
             dev_output = dev_compressedGasOutput;
         } else {
-            SDL_Log("Does not compress GAS!");
+            //SDL_Log("Does not compress GAS!");
         }
 
-        SDL_Log("GAS for spheres built.");
+        //SDL_Log("GAS for spheres built.");
         return {handle, dev_output};
     }
     GAS buildGASForTriangles(OptixDeviceContext & context, const std::vector<Triangle> & triangles) {
-        SDL_Log("Building GAS for triangles...");
+        //SDL_Log("Building GAS for triangles...");
 
         const OptixAccelBuildOptions buildOptions = {
                 .buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE,
@@ -197,7 +197,7 @@ namespace project {
         unsigned long long compressedSize = 0;
         cudaCheckError(cudaMemcpy(reinterpret_cast<void *>(&compressedSize), reinterpret_cast<void *>(dev_compressedSize), sizeof(unsigned long long), cudaMemcpyDeviceToHost));
         if (compressedSize < bufferSizes.outputSizeInBytes) {
-            SDL_Log("Compressing GAS: %zd --> %zd.", bufferSizes.outputSizeInBytes, compressedSize);
+            //SDL_Log("Compressing GAS: %zd --> %zd.", bufferSizes.outputSizeInBytes, compressedSize);
 
             //重新分配空间
             CUdeviceptr dev_compressedGasOutput = 0;
@@ -212,10 +212,10 @@ namespace project {
             cudaCheckError(cudaFree(reinterpret_cast<void *>(dev_output)));
             dev_output = dev_compressedGasOutput;
         } else {
-            SDL_Log("Does not compress GAS!");
+            //SDL_Log("Does not compress GAS!");
         }
 
-        SDL_Log("GAS for triangles built.");
+        //SDL_Log("GAS for triangles built.");
         return {handle, dev_output};
     }
     void cleanupAccelerationStructure(GAS & data) {
@@ -243,7 +243,7 @@ namespace project {
     }
 
     std::vector<OptixInstance> createInstances(const std::vector<GAS> & data) {
-        SDL_Log("Creating instances...");
+        //SDL_Log("Creating instances...");
 
         const size_t instanceCount = data.size();
         std::vector<OptixInstance> instances(instanceCount);
@@ -258,7 +258,7 @@ namespace project {
         }
 
         //此函数只部分初始化实例，在渲染前需要通过实例更新函数更新实例变换矩阵
-        SDL_Log("Instances created.");
+        //SDL_Log("Instances created.");
         return instances;
     }
 
@@ -544,11 +544,11 @@ namespace project {
     std::pair<OptixShaderBindingTable, std::vector<CUdeviceptr>> createShaderBindingTable(
             const std::array<OptixProgramGroup, 6> & programGroups, const GeometryData & geoData, const MaterialData & matData)
     {
-        SDL_Log("Creating shader binding table...");
+        //SDL_Log("Creating shader binding table...");
         std::vector<CUdeviceptr> ptrs;
 
         //raygen
-        SDL_Log("Creating raygen record...");
+        //SDL_Log("Creating raygen record...");
         RayGenSbtRecord rayGenSbtRecord = {};
         optixCheckError(optixSbtRecordPackHeader(programGroups[0], &rayGenSbtRecord));
         CUdeviceptr dev_raygenRecord = 0;
@@ -557,7 +557,7 @@ namespace project {
         ptrs.push_back(dev_raygenRecord);
 
         //miss
-        SDL_Log("Creating miss record...");
+        //SDL_Log("Creating miss record...");
         MissSbtRecord missSbtRecord = {};
         optixCheckError(optixSbtRecordPackHeader(programGroups[1], &missSbtRecord));
         missSbtRecord.data = {0.7f, 0.8f, 0.9f};
@@ -619,7 +619,7 @@ namespace project {
         }
 
         //hit - triangle
-        SDL_Log("Creating closesthit - triangle record...");
+        //SDL_Log("Creating closesthit - triangle record...");
 
         // 为所有三角形的顶点法线分配设备内存
         size_t triangleCount = triangles.size();
@@ -663,7 +663,7 @@ namespace project {
 
         //hit - particle
         //不同于三角形，此处为粒子对象中一组三角形创建一个记录，即每个粒子一条记录
-        SDL_Log("Creating closesthit - particle record...");
+        //SDL_Log("Creating closesthit - particle record...");
         for (const auto & particle : particles) {
             //为当前粒子的顶点法线分配设备内存
             triangleCount = particle.triangles.size();
@@ -713,7 +713,7 @@ namespace project {
         cudaCheckError(cudaMemcpy(reinterpret_cast<void *>(dev_hitSbtRecords), hitGroupSbtRecords.data(), hitSbtRecordCount * sizeof(HitGroupSbtRecord), cudaMemcpyHostToDevice));
         ptrs.push_back(dev_hitSbtRecords);
 
-        SDL_Log("Shader binding table created.");
+        //SDL_Log("Shader binding table created.");
         const OptixShaderBindingTable sbt = {
                 .raygenRecord = dev_raygenRecord,
                 .missRecordBase = dev_missRecord,
@@ -726,7 +726,7 @@ namespace project {
         return {sbt, ptrs};
     }
     void freeShaderBindingTable(std::pair<OptixShaderBindingTable, std::vector<CUdeviceptr>> & sbt) {
-        SDL_Log("Freeing device memory for Shader binding table...");
+        //SDL_Log("Freeing device memory for Shader binding table...");
         for (auto & item: sbt.second) {
             cudaCheckError(cudaFree(reinterpret_cast<void*>(item)));
         }

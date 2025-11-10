@@ -16,7 +16,7 @@ using json = nlohmann::json;
 #include <vtkPointData.h>
 
 namespace project {
-    std::vector<std::pair<std::string, float>> VTKReader::readSeriesFile(const std::string & filePath) {
+    std::tuple<std::vector<std::string>, std::vector<float>, size_t> VTKReader::readSeriesFile(const std::string & filePath) {
         SDL_Log("Reading series file: %s", filePath.c_str());
 
         //打开 JSON 文件
@@ -45,29 +45,43 @@ namespace project {
             exit(-1);
         }
 
-        std::vector<std::pair<std::string, float>> fileEntries;
+        std::vector<std::string> files;
+        std::vector<float> times;
+
         for (const auto & item : data["files"]) {
             //从数组中的每个对象里提取 "name" 和 "time"
             const std::string name = item["name"];
             const float time = item["time"];
-            fileEntries.push_back({name, time});
+            files.push_back(name);
+            times.push_back(time);
         }
 
-        const size_t entryCount = fileEntries.size();
+        const size_t entryCount = files.size();
         const size_t printEntryCount = std::min(entryCount, static_cast<size_t>(5));
-        SDL_Log("Found %zd vtk entries.", entryCount);
         SDL_Log("First %zd entries:", printEntryCount);
         for (size_t i = 0; i < printEntryCount; i++) {
-            SDL_Log("Time: %f --> VTK file: %s", fileEntries[i].second, fileEntries[i].first.c_str());
+            SDL_Log("Time: %f --> VTK file: %s", times[i], files[i].c_str());
         }
 
-        SDL_Log("%s parse completed. Found %zd entries.", filePath.c_str(), fileEntries.size());
-        return fileEntries;
+        SDL_Log("%s parse completed. Found %zd entries.", filePath.c_str(), entryCount);
+
+        //time的输入为每个文件出现的时间，转换为每个文件持续的时间：后一个文件的出现时间减去当前文件出现时间
+        std::vector<float> fileDurations(entryCount);
+        if (entryCount == 1) {
+            fileDurations[0] = 1000.0f;
+        } else {
+            for (size_t i = 0; i < entryCount - 1; i++) {
+                fileDurations[i] = times[i + 1] - times[i];
+            }
+            //最后一个文件的出现时间使用倒数第二个文件的时间
+            fileDurations[entryCount - 1] = fileDurations[entryCount - 2];
+        }
+
+        return {files, fileDurations, entryCount};
     }
 
     std::vector<VTKParticle> VTKReader::readVTKFile(const std::string & filePath) {
         //SDL_Log("VTK version: %s", vtkVersion::GetVTKVersion());
-        SDL_Log("Reading vtk file: %s...", filePath.c_str());
 
         //检查VTK文件头
         std::ifstream file(filePath);
@@ -213,12 +227,14 @@ namespace project {
 
     std::vector<Particle> VTKReader::convertToRendererData(const std::vector<VTKParticle> & particles) {
         //一个粒子对应一个实例，对应一个二维数组元素
-        std::vector<Particle> particleTriangles(particles.size());
+        std::vector<Particle> rendererParticles(particles.size());
 
         for (size_t i = 0; i < particles.size(); i++) {
+            const auto & particle = particles[i];
+
             //vtkTriangleStrip由N个点组成N - 2个三角形
             std::vector<Triangle> triangles;
-            const size_t triangleCount = particles[i].vertices.size() - 2;
+            const size_t triangleCount = particle.vertices.size() - 2;
             triangles.reserve(triangles.size() + triangleCount);
 
             //获取组成粒子的所有点，构造三角形数组
@@ -228,12 +244,12 @@ namespace project {
 
                 if ((j & 1) == 0) {
                     //偶数三角形，顶点顺序保持不变
-                    vertices = {particles[i].vertices[j], particles[i].vertices[j + 1], particles[i].vertices[j + 2],};
-                    normals = {particles[i].verticesNormals[j], particles[i].verticesNormals[j + 1], particles[i].verticesNormals[j + 2],};
+                    vertices = {particle.vertices[j], particle.vertices[j + 1], particle.vertices[j + 2],};
+                    normals = {particle.verticesNormals[j], particle.verticesNormals[j + 1], particle.verticesNormals[j + 2],};
                 } else {
                     //奇数三角形，第2，3个顶点需要取反以保持面法线方向一致
-                    vertices = {particles[i].vertices[j], particles[i].vertices[j + 2], particles[i].vertices[j + 1],};
-                    normals = {particles[i].verticesNormals[j], particles[i].verticesNormals[j + 2], particles[i].verticesNormals[j + 1],};
+                    vertices = {particle.vertices[j], particle.vertices[j + 2], particle.vertices[j + 1],};
+                    normals = {particle.verticesNormals[j], particle.verticesNormals[j + 2], particle.verticesNormals[j + 1],};
                 }
 
                 //将三角形存入数组。粒子的材质单独存储，无需为每个三角形赋值
@@ -245,10 +261,11 @@ namespace project {
             }
 
             //将当前粒子的所有三角形构建粒子结构体
-            particleTriangles[i].materialType = MaterialType::ROUGH;
-            particleTriangles[i].materialIndex = 1;
-            particleTriangles[i].triangles = triangles;
+            rendererParticles[i].materialType = MaterialType::ROUGH;
+            rendererParticles[i].materialIndex = 1;
+            rendererParticles[i].triangles = triangles;
+            rendererParticles[i].velocity = particle.velocity;
         }
-        return particleTriangles;
+        return rendererParticles;
     }
 }

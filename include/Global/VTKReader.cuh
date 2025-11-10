@@ -28,7 +28,7 @@ namespace project {
     class VTKReader {
     public:
         //读取.series文件，返回包含每个VTK文件路径和其时间的数组，数组长度为VTK文件数
-        static std::vector<std::pair<std::string, float>> readSeriesFile(const std::string & filePath);
+        static std::tuple<std::vector<std::string>, std::vector<float>, size_t> readSeriesFile(const std::string & filePath);
 
         //读取单个VTK文件所有粒子
         static std::vector<VTKParticle> readVTKFile(const std::string & filePath);
