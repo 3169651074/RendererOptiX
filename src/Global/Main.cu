@@ -15,7 +15,13 @@ namespace {
 }
 
 #undef main
+
+#define USE_GENERATED_VTK_CACHE
 int main(int argc, char * argv[]) {
+#ifdef GENERATE_VTK_CACHE
+    VTKReader::readSeriesFileToCache("../files/", "particle_mesh.vtk.series", "../cache/VTKParticleCache.cache");
+#endif
+
     //初始化optix
     auto context = createContext();
 
@@ -45,10 +51,11 @@ int main(int argc, char * argv[]) {
     const std::string seriesFilePath("../files/");
     const auto [files, durations, fileCount] = VTKReader::readSeriesFile(seriesFilePath + "particle_mesh.vtk.series");
 
-    //处理每个文件
+#ifndef USE_GENERATED_VTK_CACHE
     for (size_t i = 0; i < fileCount; i++) {
         //读取VTK粒子并转换为粒子数组
-        SDL_Log("[%zd/%zd] (%zd%%) Reading VTK file: %s...", i, fileCount, static_cast<size_t>(static_cast<float>(i) / fileCount * 100.0f), files[i].c_str());
+        SDL_Log("[%zd/%zd] (%zd%%) Reading VTK file: %s...", i, fileCount,
+                static_cast<size_t>(static_cast<float>(i) / fileCount * 100.0f), files[i].c_str());
         const auto vtkParticles = VTKReader::readVTKFile(seriesFilePath + files[i]);
         const auto particlesForThisFile = VTKReader::convertToRendererData(vtkParticles);
         const auto particleCountForThisFile = particlesForThisFile.size();
@@ -73,6 +80,38 @@ int main(int argc, char * argv[]) {
         //将当前文件所有粒子放到IAS中
         iasForAllFiles.push_back(buildIAS(context, instancesForThisFile));
     }
+#else
+    const auto vtkParticles = VTKReader::readVTKFromCache("../cache/VTKParticleCache.cache");
+
+    //处理每个文件
+    for (size_t i = 0; i < fileCount; i++) {
+        //转换为粒子数组
+        SDL_Log("[%zd/%zd] (%zd%%) Converting VTK file: %s...", i, fileCount,
+                static_cast<size_t>(static_cast<float>(i) / fileCount * 100.0f), files[i].c_str());
+        const auto particlesForThisFile = VTKReader::convertToRendererData(vtkParticles[i]);
+        const auto particleCountForThisFile = particlesForThisFile.size();
+        particlesForAllFiles.push_back(particlesForThisFile);
+
+        //为粒子数组中每一个粒子构造GAS列表和实例列表
+        std::vector<GAS> gasForThisFile;
+        gasForThisFile.reserve(particleCountForThisFile);
+
+        //添加独立几何体GAS，添加顺序需要和SBT记录创建顺序相同（球体 -> 三角形 -> 粒子）
+        gasForThisFile.push_back(sphereGAS);
+
+        //添加粒子GAS
+        for (size_t j = 0; j < particleCountForThisFile; j++) {
+            gasForThisFile.push_back(buildGASForTriangles(context, particlesForThisFile[j].triangles));
+        }
+        gasForAllFiles.push_back(gasForThisFile);
+
+        const auto instancesForThisFile = createInstances(gasForThisFile);
+        instancesForAllFiles.push_back(instancesForThisFile);
+
+        //将当前文件所有粒子放到IAS中
+        iasForAllFiles.push_back(buildIAS(context, instancesForThisFile));
+    }
+#endif
 
     //创建模块和管线，所有文件都相同
     const OptixPipelineCompileOptions pipelineCompileOptions = {

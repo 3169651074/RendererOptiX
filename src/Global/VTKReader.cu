@@ -1,6 +1,7 @@
 #include <Global/VTKReader.cuh>
 #include <JSON/json.hpp>
 #include <fstream>
+#include <sstream>
 using json = nlohmann::json;
 
 #include <vtkSmartPointer.h>
@@ -81,8 +82,6 @@ namespace project {
     }
 
     std::vector<VTKParticle> VTKReader::readVTKFile(const std::string & filePath) {
-        //SDL_Log("VTK version: %s", vtkVersion::GetVTKVersion());
-
         //检查VTK文件头
         std::ifstream file(filePath);
         if (!file.is_open()) {
@@ -92,7 +91,7 @@ namespace project {
         std::string line;
         getline(file, line);
         if (line.find("# vtk DataFile Version") == std::string::npos) {
-            SDL_Log("Illegal vtk file header: %s. In file %s!", line.c_str(), filePath.c_str());
+            SDL_Log("Illegal vtk file header in file %s: %s!", filePath.c_str(), line.c_str());
             exit(-1);
         }
         file.close();
@@ -103,7 +102,7 @@ namespace project {
         reader->Update();
         vtkPolyData * polyData = reader->GetOutput();
         if (polyData == nullptr || polyData->GetNumberOfPoints() == 0) {
-            SDL_Log("Failed to get poly data pointer or there is no points in this file!");
+            SDL_Log("Failed to get poly data pointer or there is no points in file %s!", filePath.c_str());
             exit(-1);
         }
 
@@ -118,7 +117,7 @@ namespace project {
         vtkDataArray * idArray = cellData ? cellData->GetArray("id") : nullptr;
         vtkDataArray * velArray = cellData ? cellData->GetArray("vel") : nullptr;
         if (cellData == nullptr || idArray == nullptr || velArray == nullptr) {
-            SDL_Log("Failed to read cell data!");
+            SDL_Log("Failed to read cell data, in file %s!", filePath.c_str());
             exit(-1);
         }
 
@@ -188,7 +187,7 @@ namespace project {
                         static_cast<float>(centroid[1]),
                         static_cast<float>(centroid[2])};
             } else {
-                SDL_Log("There is no points in cell %zd!", i);
+                SDL_Log("There is no points in cell %zd, in file %s!", i, filePath.c_str());
                 exit(-1);
             }
 
@@ -267,5 +266,213 @@ namespace project {
             rendererParticles[i].velocity = particle.velocity;
         }
         return rendererParticles;
+    }
+
+    void VTKReader::readSeriesFileToCache(const std::string & seriesFilePath, const std::string & seriesFileName, const std::string & cacheFilePath, bool isBinaryMode) {
+        SDL_Log("Generating VTK cache...");
+
+        //读取series文件
+        const auto [files, times, fileCount] = readSeriesFile(seriesFilePath + seriesFileName);
+
+        //创建缓存文件
+        std::ofstream out;
+        if (isBinaryMode) {
+            out.open(cacheFilePath, std::ios::out | std::ios::binary);
+        } else {
+            out.open(cacheFilePath, std::ios::out);
+        }
+
+        if (!out) {
+            SDL_Log("Error: Could not create or open cache file: %s!", cacheFilePath.c_str());
+            exit(-1);
+        }
+
+        //读取所有VTK文件，并将返回值写入缓存文件
+        for (size_t i = 0; i < fileCount; i++) {
+            SDL_Log("[%zd/%zd] (%zd%%) Reading VTK file: %s...", i, fileCount,
+                    static_cast<size_t>(static_cast<float>(i) / fileCount * 100.0f), files[i].c_str());
+            const auto particles = readVTKFile(seriesFilePath + files[i]);
+
+            if (isBinaryMode) {
+                //二进制模式：直接写入原始数据
+                size_t particleCount = particles.size();
+                out.write(reinterpret_cast<const char*>(&particleCount), sizeof(size_t));
+
+                for (const auto & particle: particles) {
+                    //写入基础信息
+                    out.write(reinterpret_cast<const char*>(&i), sizeof(size_t));
+                    out.write(reinterpret_cast<const char*>(&particle.id), sizeof(particle.id));
+                    out.write(reinterpret_cast<const char*>(&particle.velocity), sizeof(particle.velocity));
+                    out.write(reinterpret_cast<const char*>(&particle.boundingBoxRanges), sizeof(particle.boundingBoxRanges));
+                    out.write(reinterpret_cast<const char*>(&particle.centroid), sizeof(particle.centroid));
+
+                    //写入顶点坐标
+                    size_t vertexCount = particle.vertices.size();
+                    out.write(reinterpret_cast<const char*>(&vertexCount), sizeof(size_t));
+                    out.write(reinterpret_cast<const char*>(particle.vertices.data()), vertexCount * sizeof(float3));
+
+                    //写入顶点法线
+                    size_t normalCount = particle.verticesNormals.size();
+                    out.write(reinterpret_cast<const char*>(&normalCount), sizeof(size_t));
+                    out.write(reinterpret_cast<const char*>(particle.verticesNormals.data()), normalCount * sizeof(float3));
+                }
+            } else {
+                //文本模式：转换为字符串后写入
+                for (const auto & particle: particles) {
+                    //第一行：基础信息
+                    out << "[" << i << "]; "
+                        << "ID = " << particle.id << "; "
+                        << "Velocity = (" << particle.velocity.x << ", " << particle.velocity.y << ", " << particle.velocity.z << "); "
+                        << "BoundingBox = [0](" << particle.boundingBoxRanges[0].x << ", " << particle.boundingBoxRanges[0].y << "), "
+                        << "[1](" << particle.boundingBoxRanges[1].x << ", " << particle.boundingBoxRanges[1].y << "), "
+                        << "[2](" << particle.boundingBoxRanges[2].x << ", " << particle.boundingBoxRanges[2].y << "); "
+                        << "Centroid = (" << particle.centroid.x << ", " << particle.centroid.y << ", " << particle.centroid.z << ")\n";
+
+                    //第二行：顶点坐标，保留原格式
+                    for (const auto & vertex: particle.vertices) {
+                        out << vertex.x << ", " << vertex.y << ", " << vertex.z << ", ";
+                    }
+                    out << "\n";
+
+                    //第三行：顶点法线，保留原格式
+                    for (const auto & normal: particle.verticesNormals) {
+                        out << normal.x << ", " << normal.y << ", " << normal.z << ", ";
+                    }
+                    out << "\n";
+                }
+            }
+        }
+        out.close();
+
+        SDL_Log("Cache generated, quit.");
+        exit(0);
+    }
+
+    std::vector<std::vector<VTKParticle>> VTKReader::readVTKFromCache(const std::string & cacheFilePath, bool isBinaryMode) {
+        SDL_Log("Reading VTK cache...");
+
+        //打开缓存文件
+        std::ifstream in;
+        if (isBinaryMode) {
+            in.open(cacheFilePath, std::ios::in | std::ios::binary);
+        } else {
+            in.open(cacheFilePath, std::ios::in);
+        }
+
+        if (!in) {
+            SDL_Log("Error: Could not open cache file: %s!", cacheFilePath.c_str());
+            exit(-1);
+        }
+
+        //用于存储所有帧的粒子数据
+        std::vector<std::vector<VTKParticle>> allFrames;
+
+        if (isBinaryMode) {
+            //二进制模式：直接读取原始数据
+            while (in.peek() != EOF) {
+                size_t particleCount;
+                in.read(reinterpret_cast<char*>(&particleCount), sizeof(size_t));
+                if (in.eof()) break;
+
+                for (size_t p = 0; p < particleCount; p++) {
+                    VTKParticle particle;
+                    size_t frameIndex;
+
+                    //读取基础信息
+                    in.read(reinterpret_cast<char*>(&frameIndex), sizeof(size_t));
+                    in.read(reinterpret_cast<char*>(&particle.id), sizeof(particle.id));
+                    in.read(reinterpret_cast<char*>(&particle.velocity), sizeof(particle.velocity));
+                    in.read(reinterpret_cast<char*>(&particle.boundingBoxRanges), sizeof(particle.boundingBoxRanges));
+                    in.read(reinterpret_cast<char*>(&particle.centroid), sizeof(particle.centroid));
+
+                    //读取顶点坐标
+                    size_t vertexCount;
+                    in.read(reinterpret_cast<char*>(&vertexCount), sizeof(size_t));
+                    particle.vertices.resize(vertexCount);
+                    in.read(reinterpret_cast<char*>(particle.vertices.data()), vertexCount * sizeof(float3));
+
+                    //读取顶点法线
+                    size_t normalCount;
+                    in.read(reinterpret_cast<char*>(&normalCount), sizeof(size_t));
+                    particle.verticesNormals.resize(normalCount);
+                    in.read(reinterpret_cast<char*>(particle.verticesNormals.data()), normalCount * sizeof(float3));
+
+                    //确保allFrames有足够的空间存储当前帧
+                    if (frameIndex >= allFrames.size()) {
+                        allFrames.resize(frameIndex + 1);
+                    }
+
+                    //将粒子添加到对应帧
+                    allFrames[frameIndex].push_back(particle);
+                }
+            }
+        } else {
+            //文本模式：解析字符串
+            std::string line;
+            while (std::getline(in, line)) {
+                //第一行：基础信息
+                VTKParticle particle;
+                size_t frameIndex;
+
+                //解析基础信息
+                std::istringstream iss(line);
+                char discard;
+                iss >> discard >> frameIndex >> discard >> discard; //读取 "[frameIndex]; "
+
+                std::string temp;
+                iss >> temp >> discard >> particle.id >> discard; //读取 "ID = particle.id; "
+
+                iss >> temp >> discard >> discard; //读取 "Velocity = ("
+                iss >> particle.velocity.x >> discard >> particle.velocity.y >> discard >> particle.velocity.z >> discard >> discard; // 读取速度
+
+                iss >> temp >> discard >> discard >> discard; //读取 "BoundingBox = [0]("
+                iss >> particle.boundingBoxRanges[0].x >> discard >> particle.boundingBoxRanges[0].y >> discard >> discard; // 读取 boundingBox[0]
+                iss >> discard >> discard >> discard; //读取 "[1]("
+                iss >> particle.boundingBoxRanges[1].x >> discard >> particle.boundingBoxRanges[1].y >> discard >> discard; // 读取 boundingBox[1]
+                iss >> discard >> discard >> discard; //读取 "[2]("
+                iss >> particle.boundingBoxRanges[2].x >> discard >> particle.boundingBoxRanges[2].y >> discard >> discard; // 读取 boundingBox[2]
+
+                iss >> temp >> discard >> discard; //读取 "Centroid = ("
+                iss >> particle.centroid.x >> discard >> particle.centroid.y >> discard >> particle.centroid.z >> discard; // 读取质心
+
+                //第二行：顶点坐标
+                if (!std::getline(in, line)) {
+                    SDL_Log("Error: Unexpected end of file while reading vertices!");
+                    exit(-1);
+                }
+                std::istringstream vertexStream(line);
+                while (vertexStream.good()) {
+                    float3 vertex;
+                    vertexStream >> vertex.x >> discard >> vertex.y >> discard >> vertex.z >> discard;
+                    if (vertexStream.fail()) break;
+                    particle.vertices.push_back(vertex);
+                }
+
+                //第三行：顶点法线
+                if (!std::getline(in, line)) {
+                    SDL_Log("Error: Unexpected end of file while reading normals!");
+                    exit(-1);
+                }
+                std::istringstream normalStream(line);
+                while (normalStream.good()) {
+                    float3 normal;
+                    normalStream >> normal.x >> discard >> normal.y >> discard >> normal.z >> discard;
+                    if (normalStream.fail()) break;
+                    particle.verticesNormals.push_back(normal);
+                }
+
+                //确保allFrames有足够的空间存储当前帧
+                if (frameIndex >= allFrames.size()) {
+                    allFrames.resize(frameIndex + 1);
+                }
+
+                //将粒子添加到对应帧
+                allFrames[frameIndex].push_back(particle);
+            }
+        }
+        in.close();
+
+        SDL_Log("Cache read successfully, total frames: %zd", allFrames.size());
+        return allFrames;
     }
 }

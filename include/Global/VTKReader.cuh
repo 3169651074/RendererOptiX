@@ -35,6 +35,12 @@ namespace project {
 
         //将VTK粒子原始信息转换为粒子数组
         static std::vector<Particle> convertToRendererData(const std::vector<VTKParticle> & particles);
+
+        //读取.series文件所有VTK文件并将数据以纯文本写入缓存文件，并退出程序。此函数会清除文件原有内容
+        static void readSeriesFileToCache(const std::string & seriesFilePath, const std::string & seriesFileName, const std::string & cacheFilePath, bool isBinaryMode = true);
+
+        //从缓存文件中读取VTK数据
+        static std::vector<std::vector<VTKParticle>> readVTKFromCache(const std::string & cacheFilePath, bool isBinaryMode = true);
     };
 }
 
