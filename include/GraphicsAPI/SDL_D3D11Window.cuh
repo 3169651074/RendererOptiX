@@ -29,7 +29,7 @@ namespace project {
     void SDL_D3D11DestroyWindow(SDL_Window * & window);
 
     //初始化D3D11资源
-    Direct3D11Args SDL_D3D11InitializeResource(SDL_Window * window);
+    Direct3D11Args SDL_D3D11InitializeResource(SDL_Window * window, bool useDebugMode = false);
     void SDL_D3D11CleanupResource(Direct3D11Args & d3d11Args);
 
     //映射纹理资源

@@ -5,25 +5,48 @@ OPTIX_GLOBAL_PARAM GlobalParams params;
 
 namespace project {
     //设置和读取光线载荷
-    __device__ __forceinline__ void setPayload(const float4 & payload) {
+    __device__ __forceinline__ void setPayload(const float4 & payload, const float4 & albedo, const float4 normal) {
         optixSetPayload_0(__float_as_uint(payload.x));
         optixSetPayload_1(__float_as_uint(payload.y));
         optixSetPayload_2(__float_as_uint(payload.z));
         optixSetPayload_3(__float_as_uint(payload.w));
+
+        optixSetPayload_4(__float_as_uint(albedo.x));
+        optixSetPayload_5(__float_as_uint(albedo.y));
+        optixSetPayload_6(__float_as_uint(albedo.z));
+        optixSetPayload_7(__float_as_uint(albedo.w));
+
+        optixSetPayload_8(__float_as_uint(normal.x));
+        optixSetPayload_9(__float_as_uint(normal.y));
+        optixSetPayload_10(__float_as_uint(normal.z));
+        optixSetPayload_11(__float_as_uint(normal.w));
     }
-    __device__ __forceinline__ float4 getPayload() {
-        return {
+    __device__ __forceinline__ void getPayload(float4 & result, float4 & albedo, float4 & normal) {
+        result = {
                 __uint_as_float(optixGetPayload_0()),
                 __uint_as_float(optixGetPayload_1()),
                 __uint_as_float(optixGetPayload_2()),
                 __uint_as_float(optixGetPayload_3())
+        };
+        albedo = {
+                __uint_as_float(optixGetPayload_4()),
+                __uint_as_float(optixGetPayload_5()),
+                __uint_as_float(optixGetPayload_6()),
+                __uint_as_float(optixGetPayload_7())
+        };
+        normal = {
+                __uint_as_float(optixGetPayload_8()),
+                __uint_as_float(optixGetPayload_9()),
+                __uint_as_float(optixGetPayload_10()),
+                __uint_as_float(optixGetPayload_11())
         };
     }
 
     //发射光线
     __device__ __forceinline__ void rayTrace(
             const float3 & rayOriginInWorld, const float3 & rayDirection,
-            float tMin, float tMax, OptixTraversableHandle handle, float4 & payload)
+            float tMin, float tMax, OptixTraversableHandle handle,
+            float4 & payload, float4 & albedo, float4 & normal)
     {
         //将float重解释为无符号整数以传递至optixTrace
         unsigned int p0, p1, p2, p3;
@@ -32,15 +55,40 @@ namespace project {
         p2 = __float_as_uint(payload.z);
         p3 = __float_as_uint(payload.w);
 
+        unsigned int p4, p5, p6, p7;      //albedo
+        p4 = __float_as_uint(albedo.x);
+        p5 = __float_as_uint(albedo.y);
+        p6 = __float_as_uint(albedo.z);
+        p7 = __float_as_uint(albedo.w);
+
+        unsigned int p8, p9, p10, p11;    //normal
+        p8 = __float_as_uint(normal.x);
+        p9 = __float_as_uint(normal.y);
+        p10 = __float_as_uint(normal.z);
+        p11 = __float_as_uint(normal.w);
+
         optixTrace(handle, rayOriginInWorld, rayDirection, tMin, tMax,
                    0.0f, OptixVisibilityMask(1), OPTIX_RAY_FLAG_NONE,
-                   0, 0, 0, p0, p1, p2, p3);
+                   0, 0, 0,
+                   p0, p1, p2, p3,
+                   p4, p5, p6, p7,
+                   p8, p9, p10, p11);
 
         //读取追踪结果载荷
         payload.x = __uint_as_float(p0);
         payload.y = __uint_as_float(p1);
         payload.z = __uint_as_float(p2);
         payload.w = __uint_as_float(p3);
+
+        albedo.x = __uint_as_float(p4);
+        albedo.y = __uint_as_float(p5);
+        albedo.z = __uint_as_float(p6);
+        albedo.w = __uint_as_float(p7);
+
+        normal.x = __uint_as_float(p8);
+        normal.y = __uint_as_float(p9);
+        normal.z = __uint_as_float(p10);
+        normal.w = __uint_as_float(p11);
     }
 
     __device__ void closesthitImpl(GeometryType geometryType, MaterialType materialType) {
@@ -49,9 +97,12 @@ namespace project {
         const unsigned int tid = idx.y * dim.x + idx.x;
 
         //获取当前颜色和当前追踪深度，判断递归终止条件
-        const float4 payload = getPayload();
-        if (payload.w >= RAY_TRACE_DEPTH) {
-            setPayload(make_float4(0.0f, 0.0f, 0.0f, payload.w));
+        float4 payload, albedo, normal;
+        getPayload(payload, albedo, normal);
+        if (payload.w >= rayTraceDepth) {
+            setPayload(
+                    {0.0f, 0.0f, 0.0f, payload.w},
+                    {}, {});
             return;
         }
         const auto hitParams = reinterpret_cast<HitGroupParams *>(optixGetSbtDataPointer());
@@ -97,19 +148,22 @@ namespace project {
                 const float w = 1.0f - u - v;
 
                 //交点法向量为三个顶点法向量的插值平滑
-                const float3 normal = w * n1 + u * n2 + v * n3;
-                const bool hitFrontFace = dot(rayDirection, normal) < 0.0f;
-                normalVector = hitFrontFace ? normal : -normal;
+                const float3 _normal = w * n1 + u * n2 + v * n3;
+                const bool hitFrontFace = dot(rayDirection, _normal) < 0.0f;
+                normalVector = hitFrontFace ? _normal : -_normal;
                 break;
             }
             default:
-                setPayload(make_float4(1.0f, 0.6f, 0.8f, payload.w)); //错误颜色
+                setPayload(
+                        {1.0f, 0.6f, 0.8f, payload.w}, //错误颜色
+                        {}, {}
+                );
                 return;
         }
 
         //根据材质类型使用不同的反射光线计算方法
         float3 reflectDirection = {};
-        float3 albedo = {};
+        float3 _albedo = {};
 
         switch (materialType) {
             case MaterialType::ROUGH: {
@@ -120,7 +174,7 @@ namespace project {
                     reflectDirection = normalVector;
                 }
 
-                albedo = hitParams->rough.albedo;
+                _albedo = hitParams->rough.albedo;
                 break;
             }
             case MaterialType::METAL: {
@@ -133,11 +187,14 @@ namespace project {
                     reflectDirection += hitParams->metal.fuzz * randomSpaceVector(params.stateArray + tid, 1.0f);
                 }
 
-                albedo = hitParams->metal.albedo;
+                _albedo = hitParams->metal.albedo;
                 break;
             }
             default:
-                setPayload(make_float4(1.0f, 0.6f, 0.8f, payload.w));
+                setPayload(
+                        {1.0f, 0.6f, 0.8f, payload.w}, //错误颜色
+                        {}, {}
+                );
                 return;
         }
 
@@ -155,17 +212,33 @@ namespace project {
             }
         }
 
+        //在首次弹射时写入额外信息
+        if (MathHelper::floatValueEquals(payload.w, 1.0f)) {
+            albedo.x = _albedo.x;
+            albedo.y = _albedo.y;
+            albedo.z = _albedo.z;
+            albedo.w = 1.0f;
+
+            const float3 _normal = normalize(normalVector);
+            normal.x = _normal.x;
+            normal.y = _normal.y;
+            normal.z = _normal.z;
+            normal.w = 0.0f;
+        }
+
         //递归追踪：以当前命中点为起点发射一条新的光线
         float4 result = {payload.x, payload.y, payload.z, payload.w + 1.0f};
-        rayTrace(hitPoint, reflectDirection, FLOAT_ZERO_VALUE, FLOAT_INFINITY_VALUE, params.handle, result);
+        rayTrace(
+                hitPoint, reflectDirection, FLOAT_ZERO_VALUE, FLOAT_INFINITY_VALUE,
+                params.handle, result, albedo, normal);
 
         //应用材质基础颜色
-        result.x *= albedo.x;
-        result.y *= albedo.y;
-        result.z *= albedo.z;
+        result.x *= _albedo.x;
+        result.y *= _albedo.y;
+        result.z *= _albedo.z;
 
         //将最终着色结果写回当前光线的载荷中
-        setPayload(result);
+        setPayload(result, albedo, normal);
     }
 }
 
@@ -188,12 +261,15 @@ OPTIX_PROGRAM void __raygen__raygenProgram() {
     const float3 direction = normalize(ndc.x * aspect * U + ndc.y * V + W);
 
     //发射光线
-    float4 result = {0.0f, 0.0f, 0.0f, 1.0f};
-    rayTrace(origin, direction, FLOAT_ZERO_VALUE, FLOAT_INFINITY_VALUE, params.handle, result);
+    float4 result = {0.0f, 0.0f, 0.0f, 1.0f}, albedo, normal;
+    rayTrace(
+            origin, direction, FLOAT_ZERO_VALUE, FLOAT_INFINITY_VALUE,
+            params.handle, result, albedo, normal);
 
-    //写入颜色
-    surf2Dwrite(colorToUchar4(result), data->surfaceObject,
-                static_cast<int>(idx.x * sizeof(uchar4)), static_cast<int>(idx.y));
+    //写入颜色和辅助数据
+    data->colorBuffer[idx.y * dim.x + idx.x] = colorToFloat4(result);
+    data->albedoBuffer[idx.y * dim.x + idx.x] = albedo;
+    data->normalBuffer[idx.y * dim.x + idx.x] = normal;
 }
 
 //miss
@@ -203,7 +279,11 @@ OPTIX_PROGRAM void __miss__missProgram() {
     const auto backgroundColor = data->backgroundColor;
 
     //添加到光线载荷
-    setPayload(float4{backgroundColor.x, backgroundColor.y, backgroundColor.z, getPayload().w});
+    float4 payload, albedo, normal;
+    getPayload(payload, albedo, normal);
+    setPayload(
+            {backgroundColor.x, backgroundColor.y, backgroundColor.z, payload.w},
+            {}, {});
 }
 
 /*

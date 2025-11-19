@@ -2,8 +2,8 @@
 
 namespace project {
     SDL_GraphicsWindowCamera SDL_GraphicsWindowConfigureCamera(const float3 & center, const float3 & target, const float3 & up, SDL_GraphicsWindowAPIType type) {
-        SDL_GraphicsWindowCamera camera = {.upDirection = up, .cameraCenter = center, .cameraTarget = target};
-
+        SDL_GraphicsWindowCamera camera = {.upDirection = normalize(up), .cameraCenter = center, .cameraTarget = target};
+        //反转非OGL的相机上方向
         if (type != SDL_GraphicsWindowAPIType::OPENGL) {
             camera.upDirection = -camera.upDirection;
         }
@@ -16,7 +16,7 @@ namespace project {
     SDL_GraphicsWindowArgs SDL_CreateGraphicsWindow(
             const char * title, int width, int height, SDL_GraphicsWindowAPIType type,
             size_t fpsLimit, float mouseSensitivity, float pitchLimitDegree,
-            float cameraMoveSpeedStride, size_t initialSpeedNTimesStride)
+            float cameraMoveSpeedStride, size_t initialSpeedNTimesStride, bool useDebugMode)
     {
         SDL_Log("[SDL] Creating SDL window...");
         SDL_CheckErrorInt(SDL_Init(SDL_INIT_EVERYTHING));
@@ -40,20 +40,20 @@ namespace project {
                 SDL_CheckErrorPtr(args.window = SDL_CreateWindow(
                         title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                         width, height, SDL_WINDOW_VULKAN));
-                args.vkArgs = SDL_VKInitializeResource(args.window);
+                args.vkArgs = SDL_VKInitializeResource(args.window, useDebugMode);
                 break;
 #ifdef _WIN32
             case SDL_GraphicsWindowAPIType::DIRECT3D11:
                 SDL_CheckErrorPtr(args.window = SDL_CreateWindow(
                         title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                         width, height, 0));
-                args.d3d11Args = SDL_D3D11InitializeResource(args.window);
+                args.d3d11Args = SDL_D3D11InitializeResource(args.window, useDebugMode);
                 break;
             case SDL_GraphicsWindowAPIType::DIRECT3D12:
                 SDL_CheckErrorPtr(args.window = SDL_CreateWindow(
                         title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                         width, height, 0));
-                args.d3d12Args = SDL_D3D12InitializeResource(args.window);
+                args.d3d12Args = SDL_D3D12InitializeResource(args.window, useDebugMode);
                 break;
 #endif
             default:;
@@ -97,16 +97,18 @@ namespace project {
                         case SDLK_d:        input.keyD = true;      break;
                         case SDLK_SPACE:    input.keySpace = true;  break;
                         case SDLK_LSHIFT:   input.keyLShift = true; break;
+                        case SDLK_TAB:      input.keyTab = true;    break;
                     }
                     break;
                 case SDL_KEYUP:
                     switch (event.key.keysym.sym) {
-                        case SDLK_w:        input.keyW = false;       break;
-                        case SDLK_a:        input.keyA = false;       break;
-                        case SDLK_s:        input.keyS = false;       break;
-                        case SDLK_d:        input.keyD = false;       break;
-                        case SDLK_SPACE:    input.keySpace = false;   break;
-                        case SDLK_LSHIFT:   input.keyLShift = false;  break;
+                        case SDLK_w:        input.keyW = false;      break;
+                        case SDLK_a:        input.keyA = false;      break;
+                        case SDLK_s:        input.keyS = false;      break;
+                        case SDLK_d:        input.keyD = false;      break;
+                        case SDLK_SPACE:    input.keySpace = false;  break;
+                        case SDLK_LSHIFT:   input.keyLShift = false; break;
+                        case SDLK_TAB:      input.keyTab = false;    break;
                     }
                     break;
                 case SDL_MOUSEBUTTONDOWN:
@@ -211,25 +213,29 @@ namespace project {
         camera.cameraV = normalize(cross(camera.cameraU, camera.cameraW));
     }
 
-    cudaSurfaceObject_t SDL_GraphicsWindowPrepareFrame(SDL_GraphicsWindowArgs & args) {
+    std::pair<cudaArray_t, cudaSurfaceObject_t> SDL_GraphicsWindowPrepareFrame(SDL_GraphicsWindowArgs & args) {
         switch (args.type) {
             case SDL_GraphicsWindowAPIType::OPENGL:
                 args.cudaSurfaceObject = SDL_GLMapCudaResource(args.cudaGraphicsResource);
+                cudaCheckError(cudaGraphicsSubResourceGetMappedArray(&args.cudaArray, args.cudaGraphicsResource, 0, 0));
                 break;
             case SDL_GraphicsWindowAPIType::VULKAN:
                 args.vkImageIndex = SDL_VKPrepareFrame(args.vkArgs);
                 args.cudaSurfaceObject = args.vkArgs.cudaSurface;
+                args.cudaArray = args.vkArgs.cudaArray;
                 break;
             case SDL_GraphicsWindowAPIType::DIRECT3D11:
                 args.cudaSurfaceObject = SDL_D3D11MapCudaResource(args.d3d11Args);
+                cudaCheckError(cudaGraphicsSubResourceGetMappedArray(&args.cudaArray, args.d3d11Args.cudaResource, 0, 0));
                 break;
             case SDL_GraphicsWindowAPIType::DIRECT3D12:
                 args.d3d12Pair = SDL_D3D12PrepareFrame(args.d3d12Args);
                 args.cudaSurfaceObject = args.d3d12Args.cudaSurfaces[args.d3d12Args.frameIndex];
+                args.cudaArray = args.d3d12Args.cudaArrays[args.d3d12Args.frameIndex];
                 break;
             default:;
         }
-        return args.cudaSurfaceObject;
+        return {args.cudaArray, args.cudaSurfaceObject};
     }
 
     void SDL_GraphicsWindowPresentFrame(SDL_GraphicsWindowArgs & args) {

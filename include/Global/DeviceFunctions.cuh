@@ -185,6 +185,32 @@ namespace project {
         return colorToUchar4(float3{c.x, c.y, c.z});
     }
 
+    __host__ __device__ __forceinline__ static float4 colorToFloat4(const float3 & c) {
+        //裁剪到[0, 1]范围
+        const float cx = max(0.0f, min(c.x, 1.0f));
+        const float cy = max(0.0f, min(c.y, 1.0f));
+        const float cz = max(0.0f, min(c.z, 1.0f));
+
+        //转换为SRGB
+        constexpr float invGamma = 1.0f / 2.4f;
+        const float px = powf(cx, invGamma);
+        const float py = powf(cy, invGamma);
+        const float pz = powf(cz, invGamma);
+        const float sx = cx < 0.0031308f ? 12.92f * cx : 1.055f * px - 0.055f;
+        const float sy = cy < 0.0031308f ? 12.92f * cy : 1.055f * py - 0.055f;
+        const float sz = cz < 0.0031308f ? 12.92f * cz : 1.055f * pz - 0.055f;
+
+        //裁剪SRGB到[0, 1]范围
+        const float srgb_x = max(0.0f, min(sx, 1.0f));
+        const float srgb_y = max(0.0f, min(sy, 1.0f));
+        const float srgb_z = max(0.0f, min(sz, 1.0f));
+
+        return {srgb_x, srgb_y, srgb_z, 1.0f};
+    }
+    __host__ __device__ __forceinline__ static float4 colorToFloat4(const float4 & c) {
+        return colorToFloat4(float3{c.x, c.y, c.z});
+    }
+
     // ========== 随机数生成函数 ==========
 
     __device__ __forceinline__ static float randomDouble(curandState * state) {
@@ -404,6 +430,119 @@ namespace project {
         const float3 part3 = k * dot(k, v) * (1 - cosTheta);
 
         return part1 + part2 + part3;
+    }
+
+    // ========== float4 运算 ==========
+
+    //取反
+    __host__ __device__ __forceinline__ static float4 operator-(const float4 & obj) {
+        return {
+                -obj.x, -obj.y, -obj.z, -obj.w
+        };
+    }
+
+    //数乘除
+    __host__ __device__ __forceinline__ static void operator*=(float4 & obj, float num) {
+        obj.x *= num;
+        obj.y *= num;
+        obj.z *= num;
+        obj.w *= num;
+    }
+    __host__ __device__ __forceinline__ static float4 operator*(const float4 & obj, float num) {
+        float4 ret = obj; ret *= num; return ret;
+    }
+    __host__ __device__ __forceinline__ static float4 operator*(float num, const float4 & obj) {
+        return obj * num;
+    }
+
+    //向量分量乘除
+    __host__ __device__ __forceinline__ static void operator*=(float4 & obj1, const float4 & obj2) {
+        obj1.x *= obj2.x;
+        obj1.y *= obj2.y;
+        obj1.z *= obj2.z;
+        obj1.w *= obj2.w;
+    }
+    __host__ __device__ __forceinline__ static float4 operator*(const float4 & obj1, const float4 & obj2) {
+        float4 ret = obj1; ret *= obj2; return ret;
+    }
+    __host__ __device__ __forceinline__ static void operator/=(float4 & obj1, const float4 & obj2) {
+        obj1.x /= obj2.x;
+        obj1.y /= obj2.y;
+        obj1.z /= obj2.z;
+        obj1.w /= obj2.w;
+    }
+    __host__ __device__ __forceinline__ static float4 operator/(const float4 & obj1, const float4 & obj2) {
+        float4 ret = obj1; ret /= obj2; return ret;
+    }
+    __host__ __device__ __forceinline__ static void operator/=(float4 & obj, float num) {
+        obj.x /= num;
+        obj.y /= num;
+        obj.z /= num;
+        obj.w /= num;
+    }
+    __host__ __device__ __forceinline__ static float4 operator/(const float4 & obj, float num) {
+        float4 ret = obj; ret /= num; return ret;
+    }
+    __host__ __device__ __forceinline__ static float4 operator/(float num, const float4 & obj) {
+        return obj / num;
+    }
+
+    //数加减
+    __host__ __device__ __forceinline__ static void operator+=(float4 & obj, float num) {
+        obj.x += num;
+        obj.y += num;
+        obj.z += num;
+        obj.w += num;
+    }
+    __host__ __device__ __forceinline__ static float4 operator+(const float4 & obj, float num) {
+        float4 ret = obj; ret += num; return ret;
+    }
+    __host__ __device__ __forceinline__ static void operator-=(float4 & obj, float num) {
+        obj.x -= num;
+        obj.y -= num;
+        obj.z -= num;
+        obj.w -= num;
+    }
+    __host__ __device__ __forceinline__ static float4 operator-(const float4 & obj, float num) {
+        float4 ret = obj; ret -= num; return ret;
+    }
+
+    //向量加减
+    __host__ __device__ __forceinline__ static void operator+=(float4 & obj1, const float4 & obj2) {
+        obj1.x += obj2.x;
+        obj1.y += obj2.y;
+        obj1.z += obj2.z;
+        obj1.w += obj2.w;
+    }
+    __host__ __device__ __forceinline__ static float4 operator+(const float4 & obj1, const float4 & obj2) {
+        float4 ret = obj1; ret += obj2; return ret;
+    }
+    __host__ __device__ __forceinline__ static void operator-=(float4 & obj1, const float4 & obj2) {
+        obj1.x -= obj2.x;
+        obj1.y -= obj2.y;
+        obj1.z -= obj2.z;
+        obj1.w -= obj2.w;
+    }
+    __host__ __device__ __forceinline__ static float4 operator-(const float4 & obj1, const float4 & obj2) {
+        float4 ret = obj1; ret -= obj2; return ret;
+    }
+
+    //求模长
+    __host__ __device__ __forceinline__ static float lengthSquared(const float4 & obj) {
+        return obj.x * obj.x + obj.y * obj.y + obj.z * obj.z + obj.w * obj.w;
+    }
+    __host__ __device__ __forceinline__ static float length(const float4 & obj) {
+        return sqrt(lengthSquared(obj));
+    }
+
+    //单位化
+    __host__ __device__ __forceinline__ static float4 normalize(const float4 & obj) {
+        const float len2 = lengthSquared(obj);
+        if (len2 <= FLOAT_ZERO_VALUE * FLOAT_ZERO_VALUE) {
+            return make_float4(0.0f, 0.0f, 0.0f, 1.0f); //安全缺省
+        }
+        const float invLen = rsqrtf(len2);
+        return obj * invLen;
     }
 
     // ========== float3随机数生成函数 ==========

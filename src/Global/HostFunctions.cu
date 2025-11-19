@@ -31,7 +31,7 @@ namespace project {
         if (val != cudaSuccess) {
             SDL_LogError(SDL_LOG_CATEGORY_ERROR,
                          "[CUDA] Error: %s. At file %s in function %s. (Line %d)",
-                         cudaGetErrorString(val), function, file, line);
+                         cudaGetErrorString(val), file, function, line);
             exit(CUDA_ERROR_EXIT_CODE);
         }
     }
@@ -44,7 +44,7 @@ namespace project {
         if (result != OPTIX_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_ERROR,
                          "[OptiX] Error: %s. At file %s in function %s. (Line %d)",
-                         optixGetErrorString(result), function, file, line);
+                         optixGetErrorString(result), file, function, line);
             exit(OPTIX_ERROR_EXIT_CODE);
         }
     }
@@ -87,7 +87,7 @@ namespace project {
         if (result != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_ERROR,
                          "[VK] Error: [%d]. At file %s in function %s. (Line %d)",
-                         result, function, file, line);
+                         result, file, function, line);
             exit(VULKAN_ERROR_EXIT_CODE);
         }
     }
@@ -109,7 +109,8 @@ namespace project {
                 resultStr = errorText;
                 LocalFree(errorText);
             }
-            SDL_Log("[D3D] Error: %ls. At file %s in function %s. (Line %d)", resultStr.c_str(), file, function, line);
+            SDL_Log("[D3D] Error: %ls. At file %s in function %s. (Line %d)",
+                    resultStr.c_str(), file, function, line);
             exit(D3D_ERROR_EXIT_CODE);
         }
     }

@@ -3,12 +3,12 @@ using namespace project;
 
 namespace {
     std::vector<const char *> checkExtensions(
-            SDL_Window * window);
-    std::vector<const char *> checkDebugLayer();
+            SDL_Window * window, bool useDebugMode);
+    std::vector<const char *> checkDebugLayer(bool useDebugMode);
     VkInstance createInstance(
             SDL_Window * window, const std::vector<const char *> & requiredExtensions, const std::vector<const char *> & requiredLayers);
     VkDebugUtilsMessengerEXT createDebugLayer(
-            VkInstance & instance);
+            VkInstance & instance, bool useDebugMode);
     std::tuple<VkPhysicalDevice, VkPhysicalDeviceFeatures, VkPhysicalDeviceProperties> queryPhysicalDevice(
             VkInstance & instance);
     std::vector<const char *> checkDeviceExtensions(
@@ -46,13 +46,13 @@ namespace {
             SDL_Window * window, VkDeviceMemory & computeImageMemory,
             VkDevice & logicalDevice, VkMemoryRequirements & memoryRequirements);
     std::tuple<VkSemaphore, VkSemaphore, cudaExternalSemaphore_t, cudaExternalSemaphore_t> createSyncSemaphores(
-            VkDevice & logicalDevice);
+            VkPhysicalDevice & physicalDevice, VkDevice & logicalDevice);
     void recordCommandBufferImpl(
             SDL_Window * window, VkImage & computeImage,
             const std::vector<VkImage> & swapChainImages,
             const VkCommandBuffer & commandBuffer, Uint32 imageIndex);
     std::tuple<std::vector<VkSemaphore>, std::vector<VkSemaphore>, std::vector<VkFence>> createSyncObjects(
-            VkDevice & logicalDevice);
+            VkDevice & logicalDevice, Uint32 swapChainImageCount);
     void cleanupResources(
             VulkanArgs & args);
 }
@@ -78,16 +78,16 @@ namespace project {
         SDL_Log("[SDL] SDL window destroyed.");
     }
 
-    VulkanArgs SDL_VKInitializeResource(SDL_Window * window) {
+    VulkanArgs SDL_VKInitializeResource(SDL_Window * window, bool useDebugMode) {
         VulkanArgs args{};
 
         //1. 检查扩展和验证层
-        auto extensions = checkExtensions(window);
-        auto layers = checkDebugLayer();
+        auto extensions = checkExtensions(window, useDebugMode);
+        auto layers = checkDebugLayer(useDebugMode);
 
         //2. 创建实例和调试层
         args.instance = createInstance(window, extensions, layers);
-        args.debugMessenger = createDebugLayer(args.instance);
+        args.debugMessenger = createDebugLayer(args.instance, useDebugMode);
 
         //3. 查询物理设备
         auto [physicalDevice, features, properties] = queryPhysicalDevice(args.instance);
@@ -163,15 +163,15 @@ namespace project {
         //17. 创建同步信号量 (CUDA-VK)
         auto [cudaUpdateSemaphore, cudaReadySemaphore,
               cudaExtSemaphoreUpdate, cudaExtSemaphoreReady]
-              = createSyncSemaphores(args.logicalDevice);
+              = createSyncSemaphores(args.physicalDevice, args.logicalDevice);
         args.cudaUpdateSemaphore = cudaUpdateSemaphore;
         args.cudaReadySemaphore = cudaReadySemaphore;
         args.cudaExtSemaphoreUpdate = cudaExtSemaphoreUpdate;
         args.cudaExtSemaphoreReady = cudaExtSemaphoreReady;
 
-        //18. 创建同步对象
+        //18. 创建同步对象（为每个交换链图像创建独立的信号量）
         auto [imageAvailableSemaphores, renderFinishedSemaphores, inFlightFences] = createSyncObjects(
-                args.logicalDevice);
+                args.logicalDevice, static_cast<Uint32>(args.swapChainImages.size()));
         args.imageAvailableSemaphores = imageAvailableSemaphores;
         args.renderFinishedSemaphores = renderFinishedSemaphores;
         args.inFlightFences = inFlightFences;
@@ -202,20 +202,32 @@ namespace project {
                 args.logicalDevice, 1, &args.inFlightFences[args.currentBufferFrameIndex], VK_TRUE, UINT64_MAX
         ));
         Uint32 imageIndex = 0;
+        //获取下一个可用的交换链图像索引
+        //使用 fence 来获取图像索引（因为我们在调用时还不知道 imageIndex，无法使用对应的信号量）
+        VkFence acquireFence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceInfo = {
+                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                .flags = 0
+        };
+        vkCheckError(vkCreateFence(args.logicalDevice, &fenceInfo, nullptr, &acquireFence));
         vkCheckError(vkAcquireNextImageKHR(
                 args.logicalDevice, args.swapChain, UINT64_MAX,
-                args.imageAvailableSemaphores[args.currentBufferFrameIndex], VK_NULL_HANDLE, &imageIndex
+                VK_NULL_HANDLE, acquireFence, &imageIndex
         ));
+        vkCheckError(vkWaitForFences(args.logicalDevice, 1, &acquireFence, VK_TRUE, UINT64_MAX));
+        vkDestroyFence(args.logicalDevice, acquireFence, nullptr);
+        
+        //现在我们知道 imageIndex，手动发出 imageAvailableSemaphores[imageIndex] 信号
+        //这样后续的 vkQueueSubmit 就可以等待这个信号量了
+        const VkSemaphore signalSemaphores[] = {args.imageAvailableSemaphores[imageIndex], args.cudaUpdateSemaphore};
+        const VkSubmitInfo signalSubmitInfo = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .signalSemaphoreCount = 2,
+                .pSignalSemaphores = signalSemaphores
+        };
         vkCheckError(vkResetFences(
                 args.logicalDevice, 1, &args.inFlightFences[args.currentBufferFrameIndex]
         ));
-
-        //设置信号量以通知CUDA更新完成
-        const VkSubmitInfo signalSubmitInfo = {
-                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                .signalSemaphoreCount = 1,
-                .pSignalSemaphores = &args.cudaUpdateSemaphore
-        };
         vkCheckError(vkQueueSubmit(
                 args.graphicsQueue, 1, &signalSubmitInfo, VK_NULL_HANDLE
         ));
@@ -251,10 +263,10 @@ namespace project {
                 args.commandBuffers[args.currentBufferFrameIndex],
                 imageIndex);
 
-        //提交命令缓冲区
-        const VkSemaphore waitSemaphores[] = {args.imageAvailableSemaphores[args.currentBufferFrameIndex], args.cudaReadySemaphore};
+        //提交命令缓冲区（使用图像索引选择信号量，避免重用问题）
+        const VkSemaphore waitSemaphores[] = {args.imageAvailableSemaphores[imageIndex], args.cudaReadySemaphore};
         const VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT};
-        const VkSemaphore signalSemaphores[] = {args.renderFinishedSemaphores[args.currentBufferFrameIndex]};
+        const VkSemaphore signalSemaphores[] = {args.renderFinishedSemaphores[imageIndex]};
         const VkSubmitInfo submitInfo = {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                 .waitSemaphoreCount = 2,
@@ -286,7 +298,7 @@ namespace project {
 
 namespace {
     //检查扩展支持
-    std::vector<const char *> checkExtensions(SDL_Window * window) {
+    std::vector<const char *> checkExtensions(SDL_Window * window, bool useDebugMode) {
         SDL_Log("[VK] Checking global extensions...");
 
         //列出所有支持的扩展
@@ -305,8 +317,13 @@ namespace {
         SDL_CheckErrorBool(SDL_Vulkan_GetInstanceExtensions(window, &requiredExtensionCount, nullptr));
         std::vector<const char *> requiredExtensions(requiredExtensionCount);
         SDL_CheckErrorBool(SDL_Vulkan_GetInstanceExtensions(window, &requiredExtensionCount, requiredExtensions.data()));
-        //添加调试层扩展
-        requiredExtensions.push_back("VK_EXT_debug_utils");
+        //仅在调试模式下添加调试层扩展
+        if (useDebugMode) {
+            requiredExtensions.push_back("VK_EXT_debug_utils");
+        }
+        //添加外部内存和信号量的capabilities扩展（实例级）
+        requiredExtensions.push_back("VK_KHR_external_memory_capabilities");
+        requiredExtensions.push_back("VK_KHR_external_semaphore_capabilities");
         requiredExtensionCount = requiredExtensions.size();
         SDL_Log("[VK] Required extension count: %u.", requiredExtensionCount);
 
@@ -334,7 +351,14 @@ namespace {
     }
 
     //检查验证层支持
-    std::vector<const char *> checkDebugLayer() {
+    std::vector<const char *> checkDebugLayer(bool useDebugMode) {
+        std::vector<const char *> requiredLayers;
+        
+        if (!useDebugMode) {
+            SDL_Log("[VK] Debug mode disabled, skipping layer check.");
+            return requiredLayers;
+        }
+        
         SDL_Log("[VK] Checking layers...");
 
         //列出所有支持的层
@@ -349,7 +373,6 @@ namespace {
         SDL_Log("[VK] Available layer count: %u.", availableLayerCount);
 
         //将验证层添加到需要列表
-        std::vector<const char *> requiredLayers;
         requiredLayers.push_back("VK_LAYER_KHRONOS_validation");
         const Uint32 requiredLayerCount = requiredLayers.size();
         SDL_Log("[VK] Required layer count: %u.", requiredLayerCount);
@@ -387,7 +410,7 @@ namespace {
                 .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
                 .pEngineName = "No Engine",
                 .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-                .apiVersion = VK_API_VERSION_1_0
+                .apiVersion = VK_API_VERSION_1_1  // 需要 1.1+ 以支持 vkGetPhysicalDeviceImageFormatProperties2
         };
         const VkInstanceCreateInfo createInfo = {
                 .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -406,7 +429,12 @@ namespace {
     }
 
     //创建验证层
-    VkDebugUtilsMessengerEXT createDebugLayer(VkInstance & instance) {
+    VkDebugUtilsMessengerEXT createDebugLayer(VkInstance & instance, bool useDebugMode) {
+        if (!useDebugMode) {
+            SDL_Log("[VK] Debug mode disabled, skipping debug layer creation.");
+            return VK_NULL_HANDLE;
+        }
+        
         SDL_Log("[VK] Creating debug layer...");
 
         const VkDebugUtilsMessengerCreateInfoEXT debugLayerCreateInfo = {
@@ -980,17 +1008,54 @@ namespace {
     {
         SDL_Log("[VK] Creating compute image ...");
 
+        //查询外部内存句柄类型支持
+        int width, height;
+        SDL_GetWindowSize(window, &width, &height);
+#ifdef _WIN32
+        VkExternalMemoryHandleTypeFlags handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#else
+        VkExternalMemoryHandleTypeFlags handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#endif
+        
+        VkPhysicalDeviceExternalImageFormatInfo externalImageFormatInfo = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
+                .handleType = static_cast<VkExternalMemoryHandleTypeFlagBits>(handleType)
+        };
+        VkPhysicalDeviceImageFormatInfo2 imageFormatInfo = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+                .pNext = &externalImageFormatInfo,
+                .format = VK_FORMAT_R8G8B8A8_UNORM,
+                .type = VK_IMAGE_TYPE_2D,
+                .tiling = VK_IMAGE_TILING_OPTIMAL,
+                .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+        };
+        VkExternalImageFormatProperties externalImageFormatProperties = {
+                .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES
+        };
+        VkImageFormatProperties2 imageFormatProperties = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+                .pNext = &externalImageFormatProperties
+        };
+        
+        VkResult result = vkGetPhysicalDeviceImageFormatProperties2(
+                physicalDevice, &imageFormatInfo, &imageFormatProperties);
+        if (result != VK_SUCCESS) {
+            SDL_Log("[VK] Failed to query external memory handle type support for image format!");
+            exit(VULKAN_ERROR_EXIT_CODE);
+        }
+        
+        //检查句柄类型是否支持
+        if (!(externalImageFormatProperties.externalMemoryProperties.externalMemoryFeatures & 
+              VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT)) {
+            SDL_Log("[VK] External memory handle type does not support export for this image format!");
+            exit(VULKAN_ERROR_EXIT_CODE);
+        }
+        
         //创建可导出的VK计算图像资源
         const VkExternalMemoryImageCreateInfo externalMemoryImageCreateInfo = {
                 .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
-#ifdef _WIN32
-                .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
-#else
-                .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT
-#endif
+                .handleTypes = handleType
         };
-        int width, height;
-        SDL_GetWindowSize(window, &width, &height);
         const VkImageCreateInfo imageInfo = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                 .pNext = &externalMemoryImageCreateInfo,
@@ -1019,11 +1084,7 @@ namespace {
         vkGetImageMemoryRequirements(logicalDevice, computeImage, &memRequirements);
         const VkExportMemoryAllocateInfo exportMemoryAllocateInfo = {
                 .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
-#ifdef _WIN32
-                .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
-#else
-                .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT
-#endif
+                .handleTypes = handleType
         };
 
         SDL_Log("[VK] Finding suitable memory type...");
@@ -1160,17 +1221,37 @@ namespace {
     }
 
     //创建同步信号量
-    std::tuple<VkSemaphore, VkSemaphore, cudaExternalSemaphore_t, cudaExternalSemaphore_t> createSyncSemaphores(VkDevice & logicalDevice) {
+    std::tuple<VkSemaphore, VkSemaphore, cudaExternalSemaphore_t, cudaExternalSemaphore_t> createSyncSemaphores(
+            VkPhysicalDevice & physicalDevice, VkDevice & logicalDevice) {
         SDL_Log("[VK] Creating sync semaphores...");
+
+        //查询外部信号量句柄类型支持
+#ifdef _WIN32
+        VkExternalSemaphoreHandleTypeFlags handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#else
+        VkExternalSemaphoreHandleTypeFlags handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+#endif
+        
+        VkPhysicalDeviceExternalSemaphoreInfo externalSemaphoreInfo = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO,
+                .handleType = static_cast<VkExternalSemaphoreHandleTypeFlagBits>(handleType)
+        };
+        VkExternalSemaphoreProperties externalSemaphoreProperties = {
+                .sType = VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES
+        };
+        
+        vkGetPhysicalDeviceExternalSemaphoreProperties(physicalDevice, &externalSemaphoreInfo, &externalSemaphoreProperties);
+        
+        //检查句柄类型是否支持导出
+        if (!(externalSemaphoreProperties.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT)) {
+            SDL_Log("[VK] External semaphore handle type does not support export!");
+            exit(VULKAN_ERROR_EXIT_CODE);
+        }
 
         //创建用于互操作的信号量
         const VkExportSemaphoreCreateInfo exportSemaphoreCreateInfo = {
                 .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
-#ifdef _WIN32
-                .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT
-#else
-                .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT
-#endif
+                .handleTypes = handleType
         };
         const VkSemaphoreCreateInfo semaphoreInfo = {
                 .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -1372,14 +1453,17 @@ namespace {
     }
 
     //创建同步对象
-    std::tuple<std::vector<VkSemaphore>, std::vector<VkSemaphore>, std::vector<VkFence>> createSyncObjects(VkDevice & logicalDevice) {
-        SDL_Log("[VK] Creating sync objects...");
+    std::tuple<std::vector<VkSemaphore>, std::vector<VkSemaphore>, std::vector<VkFence>> createSyncObjects(
+            VkDevice & logicalDevice, Uint32 swapChainImageCount) {
+        SDL_Log("[VK] Creating sync objects for %u swap chain images...", swapChainImageCount);
 
         std::vector<VkSemaphore> imageAvailableSemaphores;
         std::vector<VkSemaphore> renderFinishedSemaphores;
         std::vector<VkFence> inFlightFences;
-        imageAvailableSemaphores.resize(2);
-        renderFinishedSemaphores.resize(2);
+        //为每个交换链图像创建独立的信号量，避免重用问题
+        imageAvailableSemaphores.resize(swapChainImageCount);
+        renderFinishedSemaphores.resize(swapChainImageCount);
+        //Fence仍然使用双缓冲（2个）
         inFlightFences.resize(2);
 
         const VkSemaphoreCreateInfo semaphoreInfo = {
@@ -1390,14 +1474,18 @@ namespace {
                 .flags = VK_FENCE_CREATE_SIGNALED_BIT
         };
 
-        //为每个缓冲区创建信号量和栅栏
-        for (Uint32 i = 0; i < 2; i++) {
+        //为每个交换链图像创建独立的信号量
+        for (Uint32 i = 0; i < swapChainImageCount; i++) {
             vkCheckError(vkCreateSemaphore(
                     logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]
             ));
             vkCheckError(vkCreateSemaphore(
                     logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]
             ));
+        }
+        
+        //为双缓冲创建Fence
+        for (Uint32 i = 0; i < 2; i++) {
             vkCheckError(vkCreateFence(
                     logicalDevice, &fenceInfo, nullptr, &inFlightFences[i]
             ));
@@ -1423,9 +1511,13 @@ namespace {
         vkDestroySemaphore(args.logicalDevice, args.cudaUpdateSemaphore, nullptr);
         vkDestroySemaphore(args.logicalDevice, args.cudaReadySemaphore, nullptr);
 
-        for (Uint32 i = 0; i < 2; i++) {
+        //销毁所有交换链图像信号量
+        for (Uint32 i = 0; i < args.imageAvailableSemaphores.size(); i++) {
             vkDestroySemaphore(args.logicalDevice, args.imageAvailableSemaphores[i], nullptr);
             vkDestroySemaphore(args.logicalDevice, args.renderFinishedSemaphores[i], nullptr);
+        }
+        //销毁Fence
+        for (Uint32 i = 0; i < 2; i++) {
             vkDestroyFence(args.logicalDevice, args.inFlightFences[i], nullptr);
         }
         vkDestroyCommandPool(args.logicalDevice, args.commandPool, nullptr);
@@ -1444,13 +1536,16 @@ namespace {
         vkDestroySurfaceKHR(args.instance, args.surface, nullptr);
         vkDestroyDevice(args.logicalDevice, nullptr);
 
-        const auto destroyDebugLayerFunc = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-                vkGetInstanceProcAddr(args.instance, "vkDestroyDebugUtilsMessengerEXT"));
-        if (destroyDebugLayerFunc == nullptr) {
-            SDL_Log("[VK] Failed to destroy debug layer");
-        } else {
-            (*destroyDebugLayerFunc)(args.instance, args.debugMessenger, nullptr);
-            SDL_Log("[VK] Debug layer destroyed");
+        //仅在调试层存在时销毁
+        if (args.debugMessenger != VK_NULL_HANDLE) {
+            const auto destroyDebugLayerFunc = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+                    vkGetInstanceProcAddr(args.instance, "vkDestroyDebugUtilsMessengerEXT"));
+            if (destroyDebugLayerFunc == nullptr) {
+                SDL_Log("[VK] Failed to destroy debug layer");
+            } else {
+                (*destroyDebugLayerFunc)(args.instance, args.debugMessenger, nullptr);
+                SDL_Log("[VK] Debug layer destroyed");
+            }
         }
         vkDestroyInstance(args.instance, nullptr);
 

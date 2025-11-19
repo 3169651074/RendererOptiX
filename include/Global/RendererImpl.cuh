@@ -6,7 +6,7 @@
 
 namespace project {
     //缓存读写最大并发线程数
-    constexpr size_t MAX_CACHE_LOAD_THREAD_COUNT = 8;
+    extern size_t maxCacheLoadThreadCount;
 
     //着色器绑定表数据类型
     template <typename T>
@@ -144,6 +144,38 @@ namespace project {
 
     //释放一组SBT记录的设备内存
     void freeSBTRecords(std::vector<SBT> & sbtAllfiles);
+
+    //初始化降噪器
+    typedef struct DenoiserArgs {
+        OptixDenoiser denoiser;
+        int windowWidth, windowHeight;
+
+        //输入输出surface
+        CUdeviceptr denoiserInputBuffers[3];
+        OptixImage2D denoiserInputImages[3];
+        unsigned int rowStrideFloat4, rowStrideUchar4;
+
+        //降噪器运行所需空间
+        OptixDenoiserSizes denoiserSizes;
+        CUdeviceptr denoiserStateBuffer, denoiserScratchBuffer;
+
+        //降噪器参数
+        OptixDenoiserLayer denoiserLayer;
+        OptixDenoiserGuideLayer denoiserGuideLayer;
+        OptixDenoiserParams denoiserParams;
+
+        OptixImage2D denoiserOutputImage;
+        CUdeviceptr denoiserOutputBuffer;  //float4降噪器输出
+        CUdeviceptr denoiserDisplayBuffer; //uchar4降噪器输出
+    } DenoiserArgs;
+    DenoiserArgs initDenoiser(OptixDeviceContext & context, int windowWidth, int windowHeight);
+    void freeDenoiserResources(DenoiserArgs & args);
+
+    //执行降噪
+    void denoiseOutput(const DenoiserArgs & args, cudaArray_t outputCudaArray);
+
+    //跳过降噪
+    void skipDenoise(const DenoiserArgs & args, const float4 * colorBuffer, cudaArray_t outputCudaArray);
 }
 
 #endif //RENDEREROPTIX_RENDERERIMPL_CUH

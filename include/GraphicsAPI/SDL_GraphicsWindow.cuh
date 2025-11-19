@@ -55,6 +55,7 @@ namespace project {
         std::chrono::microseconds targetFrameDuration;
         std::chrono::microseconds sleepMargin;
 
+        cudaArray_t cudaArray;
         cudaGraphicsResource_t cudaGraphicsResource;
         cudaSurfaceObject_t cudaSurfaceObject;
     } SDL_GraphicsWindowArgs;
@@ -67,6 +68,9 @@ namespace project {
         bool keyQuit = false;
 
         int mouseX = 0, mouseY = 0; //鼠标变量需要每一帧重置
+
+        //额外按键
+        bool keyTab = false;
     } SDL_GraphicsWindowKeyMouseInput;
 
     //根据基础信息计算相机视口向量
@@ -78,7 +82,7 @@ namespace project {
     SDL_GraphicsWindowArgs SDL_CreateGraphicsWindow(
             const char * title, int width, int height, SDL_GraphicsWindowAPIType type,
             size_t fpsLimit = 60, float mouseSensitivity = 0.001f, float pitchLimitDegree = 80.0f,
-            float cameraMoveSpeedStride = 0.02f, size_t initialSpeedNTimesStride = 2);
+            float cameraMoveSpeedStride = 0.02f, size_t initialSpeedNTimesStride = 2, bool useDebugMode = false);
 
     //记录帧开始
     void SDL_GraphicsWindowFrameStart(SDL_GraphicsWindowArgs & args);
@@ -89,7 +93,7 @@ namespace project {
             SDL_GraphicsWindowArgs & args, SDL_GraphicsWindowCamera & camera);
 
     //准备用于写入的资源
-    cudaSurfaceObject_t SDL_GraphicsWindowPrepareFrame(SDL_GraphicsWindowArgs & args);
+    std::pair<cudaArray_t, cudaSurfaceObject_t> SDL_GraphicsWindowPrepareFrame(SDL_GraphicsWindowArgs & args);
 
     //呈现画面
     void SDL_GraphicsWindowPresentFrame(SDL_GraphicsWindowArgs & args);

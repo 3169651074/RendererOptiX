@@ -18,7 +18,7 @@
  */
 namespace project {
     //实例更新函数类型
-    typedef void (*UpdateAddInstancesFunc)(OptixInstance * pin_instancesThisFile, unsigned long long frameCount);
+    typedef void (*UpdateAddInstancesFunc)(OptixInstance * pin_instancesThisFile, size_t instanceCount, unsigned long long frameCount);
 
     //以下定义的类型仅用于接收输入，不用于渲染
     //几何体
@@ -79,6 +79,7 @@ namespace project {
         std::array<OptixModule, 3> modules;
         std::array<OptixProgramGroup, 6> programGroups;
         OptixPipeline pipeline;
+        OptixDenoiser denoiser;
 
         //raygen和miss记录
         std::pair<CUdeviceptr, CUdeviceptr> raygenMissPtr;
@@ -90,44 +91,51 @@ namespace project {
     } RendererData;
 
     //提交额外几何体和材质数据。此函数完成所有准备工作
-    RendererData commitRendererData(
-            GeometryData & addGeoData, MaterialData & addMatData,
-            const std::string & seriesFilePath, const std::string & seriesFileName,
-            const std::string & cacheFilePath);
+    class Renderer {
+    public:
+        //初始化渲染器
+        static RendererData commitRendererData(
+                GeometryData & addGeoData, MaterialData & addMatData,
+                const std::string & seriesFilePath, const std::string & seriesFileName,
+                const std::string & cacheFilePath, bool isDebugMode);
 
-    //生成VTK粒子缓存文件并退出
-    void writeCacheFilesAndExit(
-            const std::string & seriesFilePath, const std::string & seriesFileName,
-            const std::string & cacheFilePath);
+        //生成VTK粒子缓存文件并退出
+        static void writeCacheFilesAndExit(
+                const std::string & seriesFilePath, const std::string & seriesFileName,
+                const std::string & cacheFilePath);
 
-    //设置额外实例更新函数，额外实例按照输入顺序排在整个实例列表pin_instances的头部，函数将在每帧被调用
-    void setAddGeoInsUpdateFunc(RendererData & data, UpdateAddInstancesFunc func);
+        //设置额外实例更新函数，额外实例按照输入顺序排在整个实例列表pin_instances的头部，函数将在每帧被调用
+        static void setAddGeoInsUpdateFunc(RendererData & data, UpdateAddInstancesFunc func);
 
-    //启动循环
-    typedef struct RenderLoopData {
-        SDL_GraphicsWindowAPIType apiType;
-        int windowWidth, windowHeight;
-        const char * windowTitle;
+        //启动循环
+        typedef struct RenderLoopData {
+            SDL_GraphicsWindowAPIType apiType;
+            int windowWidth, windowHeight;
+            const char * windowTitle;
 
-        size_t targetFPS;
-        float3 cameraCenter, cameraTarget, upDirection;
+            size_t targetFPS;
+            float3 cameraCenter, cameraTarget, upDirection;
 
-        size_t renderSpeedRatio;
-        float3 particleOffset, particleScale;
-        float mouseSensitivity, pitchLimitDegree;
-        float cameraMoveSpeedStride;
-        size_t initialSpeedNTimesStride;
+            size_t renderSpeedRatio;
+            float3 particleOffset, particleScale;
+            float mouseSensitivity, pitchLimitDegree;
+            float cameraMoveSpeedStride;
+            size_t initialSpeedNTimesStride;
+            bool isGraphicsAPIDebugMode;
 
-        RenderLoopData(
-                SDL_GraphicsWindowAPIType apiType, int windowWidth, int windowHeight, const char * windowTitle,
-                size_t targetFPS, const float3 & cameraCenter, const float3 & cameraTarget, const float3 & upDirection,
-                size_t renderSpeedRatio, const float3 & particleOffset = {}, const float3 & particleScale = {1.0f, 1.0f, 1.0f},
-                float mouseSensitivity = 0.002f, float pitchLimitDegree = 85.0f, float cameraMoveSpeedStride = 0.002f, size_t initialSpeedNTimesStride = 10);
-    } RenderLoopData;
-    void startRender(RendererData & data, const RenderLoopData & loopData);
+            RenderLoopData(
+                    SDL_GraphicsWindowAPIType apiType, int windowWidth, int windowHeight, const char * windowTitle,
+                    size_t targetFPS, const float3 & cameraCenter, const float3 & cameraTarget, const float3 & upDirection,
+                    size_t renderSpeedRatio, const float3 & particleOffset = {}, const float3 & particleScale = {1.0f, 1.0f, 1.0f},
+                    float mouseSensitivity = 0.002f, float pitchLimitDegree = 85.0f,
+                    float cameraMoveSpeedStride = 0.002f, size_t initialSpeedNTimesStride = 10,
+                    bool isGraphicsAPIDebugMode = false);
+        } RenderLoopData;
+        static void startRender(RendererData & data, const RenderLoopData & loopData);
 
-    //释放数据
-    void freeRendererData(RendererData & data);
+        //释放渲染器数据
+        static void freeRendererData(RendererData & data);
+    };
 }
 
 #endif //RENDEREROPTIX_RENDERER_CUH

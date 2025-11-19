@@ -3,8 +3,8 @@
 using namespace project;
 
 namespace {
-    ComPtr<ID3D12Debug> enableDebugLayer();
-    std::pair<ComPtr<IDXGIFactory4>, ComPtr<IDXGIFactory5>> createDXGIFactory();
+    ComPtr<ID3D12Debug> enableDebugLayer(bool useDebugMode);
+    std::pair<ComPtr<IDXGIFactory4>, ComPtr<IDXGIFactory5>> createDXGIFactory(bool useDebugMode);
     ComPtr<IDXGIAdapter1> queryAdapter(
             ComPtr<IDXGIFactory4> & dxgiFactory4);
     ComPtr<ID3D12Device> createDevice(
@@ -59,11 +59,11 @@ namespace project {
         SDL_Log("[SDL] SDL window destroyed.");
     }
 
-    Direct3D12Args SDL_D3D12InitializeResource(SDL_Window * window) {
+    Direct3D12Args SDL_D3D12InitializeResource(SDL_Window * window, bool useDebugMode) {
         SDL_Log("[D3D12] Initializing D3D12...");
 
-        auto debugInterface = enableDebugLayer();
-        auto [dxgiFactory4, dxgiFactory5] = createDXGIFactory();
+        auto debugInterface = enableDebugLayer(useDebugMode);
+        auto [dxgiFactory4, dxgiFactory5] = createDXGIFactory(useDebugMode);
         auto adapter = queryAdapter(dxgiFactory4);
         auto device = createDevice(adapter);
         auto commandQueue = createCommandQueue(device);
@@ -185,7 +185,12 @@ namespace project {
 
 namespace {
     //启用调试层
-    ComPtr<ID3D12Debug> enableDebugLayer() {
+    ComPtr<ID3D12Debug> enableDebugLayer(bool useDebugMode) {
+        if (!useDebugMode) {
+            SDL_Log("[D3D12] Debug mode disabled, skipping debug layer.");
+            return nullptr;
+        }
+        
         SDL_Log("[D3D12] Enabling debug layer...");
 
         ComPtr<ID3D12Debug> debugInterface = nullptr;
@@ -197,13 +202,14 @@ namespace {
     }
 
     //创建DXGI工厂
-    std::pair<ComPtr<IDXGIFactory4>, ComPtr<IDXGIFactory5>> createDXGIFactory() {
+    std::pair<ComPtr<IDXGIFactory4>, ComPtr<IDXGIFactory5>> createDXGIFactory(bool useDebugMode) {
         SDL_Log("[D3D12] Creating DXGI factory...");
 
         ComPtr<IDXGIFactory4> dxgiFactory4 = nullptr;
         ComPtr<IDXGIFactory5> dxgiFactory5 = nullptr;
-        //创建Factory4
-        D3DCheckError(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&dxgiFactory4)));
+        //创建Factory4，仅在调试模式下使用DEBUG标志
+        UINT factoryFlags = useDebugMode ? DXGI_CREATE_FACTORY_DEBUG : 0;
+        D3DCheckError(CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(&dxgiFactory4)));
 
         //转换为Factory5以检查撕裂支持
         if (SUCCEEDED(dxgiFactory4.As(&dxgiFactory5))) {

@@ -1,7 +1,6 @@
 #include <Global/Renderer.cuh>
 
 namespace project {
-
     //转换额外输入为渲染器格式：将输入数据拷贝至设备内存并释放输入数组内存
     void mapAddGeoAndMatData(RendererData & data, GeometryData & addGeoData, MaterialData & addMatData) {
         //输入数组中一个二维数组元素对应一个或多个几何体，对应一个渲染器输入数据对象
@@ -167,10 +166,10 @@ namespace project {
         cudaCheckError(cudaStreamDestroy(stream));
     }
 
-    RendererData commitRendererData(
+    RendererData Renderer::commitRendererData(
             GeometryData & addGeoData, MaterialData & addMatData,
             const std::string & seriesFilePath, const std::string & seriesFileName,
-            const std::string & cacheFilePath)
+            const std::string & cacheFilePath, bool isDebugMode)
     {
         SDL_Log("Loading renderer data...");
         RendererData data = {
@@ -180,7 +179,7 @@ namespace project {
         };
 
         //初始化OptiX上下文
-        data.context = createContext(cacheFilePath, true);
+        data.context = createContext(cacheFilePath, isDebugMode);
 
         //转换输入并为额外几何体构建GAS
         SDL_Log("Loading additional geometry and material data...");
@@ -199,22 +198,10 @@ namespace project {
         //多线程读取VTK缓存文件
         std::vector<std::thread> threads;
         std::atomic<size_t> processedFileCount(0);
-#ifdef ALL_LAUNCH
-        //启动全部CPU线程
-        SDL_Log("Loading VTK cache data...");
-        for (size_t i = 0; i < fileCount; i++) {
-            threads.emplace_back(               //此函数中直接传递参数将会被复制，需要使用std::ref和std::cref表示引用
-                    readVTKFileCache,
-                    i, fileCount, data.materialAllFiles.roughs.size(),
-                    cacheFilePath + "particle" + std::to_string(i) + ".cache", std::ref(processedFileCount),
-                    std::cref(data.addGAS), std::ref(data)
-           );
-        }
-#else
+
         //启动线程数不超过设定的最大值，防止CPU占用过高
-        const size_t hwThreads = std::thread::hardware_concurrency();
-        const size_t maxWorkers = (MAX_CACHE_LOAD_THREAD_COUNT == 0) ? hwThreads : MAX_CACHE_LOAD_THREAD_COUNT;
-        SDL_Log("Loading VTK cache data... (max %zu worker threads)", maxWorkers);
+        const size_t threadCount = std::min<size_t>(std::thread::hardware_concurrency(), maxCacheLoadThreadCount);
+        SDL_Log("Reading VTK cache file using %zd concurrent threads...", threadCount);
 
         std::deque<std::thread> workers;
         for (size_t i = 0; i < fileCount; i++) {
@@ -226,7 +213,7 @@ namespace project {
                     std::cref(data.addGAS),
                     std::ref(data));
             //当启动的线程数达到限制值时等待队列前端（最先启动的线程）完成后，将其析构
-            if (workers.size() == maxWorkers) {
+            if (workers.size() == threadCount) {
                 workers.front().join();
                 workers.pop_front();
             }
@@ -236,7 +223,6 @@ namespace project {
             workers.front().join();
             workers.pop_front();
         }
-#endif
 
         //在等待线程执行时主线程生成材质。所有VTK文件的所有粒子使用同一个材质数组，和额外材质数组组合为全局材质数组
         //使用颜色映射器和最大粒子数生成VTK材质数组
@@ -255,13 +241,13 @@ namespace project {
         const OptixPipelineCompileOptions pipelineCompileOptions = {
                 .usesMotionBlur = 0,
                 .traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY,
-                .numPayloadValues = 4,      //3个颜色分量+1个当前追踪深度
+                .numPayloadValues = 12,      //3个颜色分量+1个当前追踪深度+8个降噪器辅助参数
                 .numAttributeValues = 3,
                 .exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE,
                 .pipelineLaunchParamsVariableName = "params",
                 .usesPrimitiveTypeFlags = static_cast<unsigned int>(OPTIX_PRIMITIVE_TYPE_FLAGS_SPHERE | OPTIX_PRIMITIVE_TYPE_FLAGS_TRIANGLE)
         };
-        data.modules = createModules(data.context, pipelineCompileOptions, true);
+        data.modules = createModules(data.context, pipelineCompileOptions, isDebugMode);
         data.programGroups = createProgramGroups(data.context, data.modules);
         data.pipeline = linkPipeline(data.context, data.programGroups, pipelineCompileOptions);
 
@@ -323,9 +309,12 @@ namespace project {
         return data;
     }
 
-    void startRender(RendererData & data, const RenderLoopData & loopData) {
+    void Renderer::startRender(RendererData & data, const RenderLoopData & loopData) {
         SDL_Log("Starting renderer...");
         const size_t addGeoCount = data.addSpheres.size() + data.addTriangles.size();
+
+        //初始化降噪器
+        DenoiserArgs denoiserArgs = initDenoiser(data.context, loopData.windowWidth, loopData.windowHeight);
 
         //初始化随机数生成器
         curandState * dev_stateArray = nullptr;
@@ -339,7 +328,10 @@ namespace project {
         );
         auto args = SDL_CreateGraphicsWindow(
                 loopData.windowTitle, loopData.windowWidth, loopData.windowHeight,
-                loopData.apiType, loopData.targetFPS);
+                loopData.apiType, loopData.targetFPS,
+                loopData.mouseSensitivity, loopData.pitchLimitDegree,
+                loopData.cameraMoveSpeedStride, loopData.initialSpeedNTimesStride,
+                loopData.isGraphicsAPIDebugMode);
 
         //设置全局参数
         GlobalParams params = {
@@ -348,6 +340,14 @@ namespace project {
         };
         CUdeviceptr dev_params = 0;
         cudaCheckError(cudaMalloc(reinterpret_cast<void **>(&dev_params), sizeof(GlobalParams)));
+
+        RayGenParams raygenData = {
+                .width = static_cast<unsigned int>(loopData.windowWidth),
+                .height = static_cast<unsigned int>(loopData.windowHeight),
+                .colorBuffer = reinterpret_cast<float4 *>(denoiserArgs.denoiserInputBuffers[0]),
+                .albedoBuffer = reinterpret_cast<float4 *>(denoiserArgs.denoiserInputBuffers[1]),
+                .normalBuffer = reinterpret_cast<float4 *>(denoiserArgs.denoiserInputBuffers[2]),
+        };
 
         //当前使用的文件下标，即加速结构索引
         size_t currentFileIndex = 0;
@@ -388,7 +388,7 @@ namespace project {
                 }
 
                 //更新额外几何体变换矩阵并拷贝至设备内存
-                (*data.func)(asThisFile.pin_instances, frameCount);
+                (*data.func)(asThisFile.pin_instances, asThisFile.instanceCount, frameCount);
                 cudaCheckError(cudaMemcpy(
                         asThisFile.dev_instances, asThisFile.pin_instances,
                         asThisFile.instanceCount * sizeof(OptixInstance), cudaMemcpyHostToDevice));
@@ -396,20 +396,16 @@ namespace project {
                 updateIAS(data.context, asThisFile.ias, asThisFile.dev_instances, asThisFile.instanceCount);
 
                 //更新raygen
-                const RayGenParams rgData = {
-                        .width = static_cast<unsigned int>(loopData.windowWidth),
-                        .height = static_cast<unsigned int>(loopData.windowHeight),
-                        .surfaceObject = SDL_GraphicsWindowPrepareFrame(args),
-                        .cameraCenter = camera.cameraCenter,
-                        .cameraU = camera.cameraU,
-                        .cameraV = camera.cameraV,
-                        .cameraW = camera.cameraW
-                };
+                auto [outputCudaArray, outputSurfaceObject] = SDL_GraphicsWindowPrepareFrame(args);
+                raygenData.cameraCenter = camera.cameraCenter;
+                raygenData.cameraU = camera.cameraU;
+                raygenData.cameraV = camera.cameraV;
+                raygenData.cameraW = camera.cameraW;
                 cudaCheckError(cudaMemcpy(
                         reinterpret_cast<void *>(data.raygenMissPtr.first + OPTIX_SBT_RECORD_HEADER_SIZE),
-                        &rgData, sizeof(RayGenParams), cudaMemcpyHostToDevice));
+                        &raygenData, sizeof(RayGenParams), cudaMemcpyHostToDevice));
 
-                //更新全局参数
+                //更新IAS
                 params.handle = std::get<0>(asThisFile.ias);
                 cudaCheckError(cudaMemcpy(reinterpret_cast<void *>(dev_params),&params, sizeof(GlobalParams),cudaMemcpyHostToDevice));
 
@@ -418,6 +414,13 @@ namespace project {
                         data.pipeline, nullptr, dev_params, sizeof(GlobalParams),
                         &sbtRecordThisFile.first, loopData.windowWidth, loopData.windowHeight, 1));
                 cudaCheckError(cudaDeviceSynchronize());
+
+                //降噪，当按下tab时不降噪
+                if (!input.keyTab) {
+                    denoiseOutput(denoiserArgs, outputCudaArray);
+                } else {
+                    skipDenoise(denoiserArgs, raygenData.colorBuffer, outputCudaArray);
+                }
 
                 //显示
                 SDL_GraphicsWindowPresentFrame(args);
@@ -442,9 +445,12 @@ namespace project {
         SDL_DestroyGraphicsWindow(args);
         cudaCheckError(cudaFree(reinterpret_cast<void *>(dev_params)));
         RandomGenerator::freeDeviceRandomGenerators(dev_stateArray);
+
+        //释放降噪器资源
+        freeDenoiserResources(denoiserArgs);
     }
 
-    void freeRendererData(RendererData & data) {
+    void Renderer::freeRendererData(RendererData & data) {
         SDL_Log("Render finished, cleaning up resources...");
 
         //释放设备端额外几何体数据
@@ -490,7 +496,7 @@ namespace project {
         data = {};
     }
 
-    void writeCacheFilesAndExit(
+    void Renderer::writeCacheFilesAndExit(
             const std::string & seriesFilePath, const std::string & seriesFileName,
             const std::string & cacheFilePath)
     {
@@ -498,7 +504,7 @@ namespace project {
         exit(0);
     }
 
-    void setAddGeoInsUpdateFunc(RendererData & data, UpdateAddInstancesFunc func) {
+    void Renderer::setAddGeoInsUpdateFunc(RendererData & data, UpdateAddInstancesFunc func) {
         if (func == nullptr) {
             SDL_Log("Update instances function pointer is null, additional instance will never be updated!");
         } else {
@@ -507,13 +513,14 @@ namespace project {
         }
     }
 
-    RenderLoopData::RenderLoopData(
+    Renderer::RenderLoopData::RenderLoopData(
             SDL_GraphicsWindowAPIType apiType, int windowWidth, int windowHeight, const char * windowTitle,
             size_t targetFPS, const float3 & cameraCenter, const float3 & cameraTarget, const float3 & upDirection,
             size_t renderSpeedRatio, const float3 & particleOffset, const float3 & particleScale,
-    float mouseSensitivity, float pitchLimitDegree, float cameraMoveSpeedStride, size_t initialSpeedNTimesStride)
+    float mouseSensitivity, float pitchLimitDegree, float cameraMoveSpeedStride, size_t initialSpeedNTimesStride, bool isGraphicsAPIDebugMode)
     : apiType(apiType), windowWidth(windowWidth), windowHeight(windowHeight), windowTitle(windowTitle),
     targetFPS(targetFPS), cameraCenter(cameraCenter), cameraTarget(cameraTarget), upDirection(upDirection),
     renderSpeedRatio(renderSpeedRatio), particleOffset(particleOffset), particleScale(particleScale),
-    mouseSensitivity(mouseSensitivity), pitchLimitDegree(pitchLimitDegree), cameraMoveSpeedStride(cameraMoveSpeedStride), initialSpeedNTimesStride(initialSpeedNTimesStride) {}
+    mouseSensitivity(mouseSensitivity), pitchLimitDegree(pitchLimitDegree),
+    cameraMoveSpeedStride(cameraMoveSpeedStride), initialSpeedNTimesStride(initialSpeedNTimesStride), isGraphicsAPIDebugMode(isGraphicsAPIDebugMode) {}
 }

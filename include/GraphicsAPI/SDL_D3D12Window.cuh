@@ -35,7 +35,7 @@ namespace project {
     void SDL_D3D12DestroyWindow(SDL_Window * & window);
 
     //初始化D3D12资源
-    Direct3D12Args SDL_D3D12InitializeResource(SDL_Window * window);
+    Direct3D12Args SDL_D3D12InitializeResource(SDL_Window * window, bool useDebugMode = false);
     void SDL_D3D12CleanupResource(Direct3D12Args & args);
 
     //渲染一帧

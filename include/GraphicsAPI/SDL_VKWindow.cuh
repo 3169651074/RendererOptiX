@@ -45,7 +45,7 @@ namespace project {
     void SDL_VKDestroyWindow(SDL_Window * & window);
 
     //初始化VK资源
-    VulkanArgs SDL_VKInitializeResource(SDL_Window * window);
+    VulkanArgs SDL_VKInitializeResource(SDL_Window * window, bool useDebugMode = false);
     void SDL_VKCleanupResource(VulkanArgs & vkArgs);
 
     //呈现画面

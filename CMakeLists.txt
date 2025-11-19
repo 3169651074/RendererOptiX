@@ -106,6 +106,7 @@ add_executable(${EXECUTABLE_NAME}
         include/Util/ColorRamp.cuh
         include/Global/Renderer.cuh
         src/Global/Renderer.cu
+        include/Util/ProgramArgumentParser.cuh
 )
 
 #确保在链接主程序之前，所有PTX文件都已生成

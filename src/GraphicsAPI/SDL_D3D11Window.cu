@@ -3,7 +3,7 @@
 using namespace project;
 
 namespace {
-    ComPtr<IDXGIFactory2> createDXGIFactory();
+    ComPtr<IDXGIFactory2> createDXGIFactory(bool useDebugMode);
     ComPtr<IDXGIAdapter> findAdapter(ComPtr<IDXGIFactory2> & dxgiFactory2);
     std::pair<ComPtr<ID3D11Device>, ComPtr<ID3D11DeviceContext>> createDevice(ComPtr<IDXGIAdapter> & adapter);
     ComPtr<IDXGISwapChain1> createSwapchain(SDL_Window * window, ComPtr<IDXGIFactory2> & dxgiFactory2, ComPtr<ID3D11Device> & device);
@@ -38,10 +38,10 @@ namespace project {
         SDL_Log("[SDL] SDL window destroyed.");
     }
 
-    Direct3D11Args SDL_D3D11InitializeResource(SDL_Window * window) {
+    Direct3D11Args SDL_D3D11InitializeResource(SDL_Window * window, bool useDebugMode) {
         SDL_Log("[D3D11] Initializing D3D11...");
 
-        auto dxgiFactory = createDXGIFactory();
+        auto dxgiFactory = createDXGIFactory(useDebugMode);
         auto adapter = findAdapter(dxgiFactory);
         auto [device, deviceContext] = createDevice(adapter);
         auto swapChain = createSwapchain(window, dxgiFactory, device);
@@ -101,11 +101,13 @@ namespace project {
 
 namespace {
     //创建DXGI工厂
-    ComPtr<IDXGIFactory2> createDXGIFactory() {
+    ComPtr<IDXGIFactory2> createDXGIFactory(bool useDebugMode) {
         SDL_Log("[D3D11] Creating DXGI factory...");
 
         ComPtr<IDXGIFactory2> dxgiFactory2 = nullptr;
-        D3DCheckError(CreateDXGIFactory2(0, IID_PPV_ARGS(&dxgiFactory2)));
+        //仅在调试模式下使用DEBUG标志
+        UINT factoryFlags = useDebugMode ? DXGI_CREATE_FACTORY_DEBUG : 0;
+        D3DCheckError(CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(&dxgiFactory2)));
 
         //启用撕裂支持：尝试将 factory 转换为第5版
         ComPtr<IDXGIFactory5> dxgiFactory5 = nullptr;

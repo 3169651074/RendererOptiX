@@ -1,6 +1,8 @@
 #include <Global/RendererImpl.cuh>
 
 namespace project {
+    size_t maxCacheLoadThreadCount;
+
     OptixDeviceContext createContext(const std::string & cacheFilePath, bool isDebug) {
         SDL_Log("Creating context...");
         cudaCheckError(cudaFree(nullptr));
@@ -430,7 +432,7 @@ namespace project {
     {
         SDL_Log("Linking pipeline...");
         const OptixPipelineLinkOptions pipelineLinkOptions = {
-                .maxTraceDepth = RAY_TRACE_DEPTH
+                .maxTraceDepth = rayTraceDepth
         };
 
         //将所有传入的程序组都用于创建管线
@@ -566,5 +568,168 @@ namespace project {
             cudaCheckError(cudaFree(reinterpret_cast<void *>(sbtThisFile.second)));
         }
         sbtAllfiles = {};
+    }
+
+    DenoiserArgs initDenoiser(OptixDeviceContext & context, int windowWidth, int windowHeight) {
+        SDL_Log("Initializing denoiser...");
+        DenoiserArgs args = {};
+
+        /*
+         * 对于噪点+基础颜色+法线的降噪器：
+         *   输入：3个float4类型的cudaArray_t + cudaSrufaceObject_t，需要转换为OptixImage2D
+         *   输出：1个输入类型
+         *   每个OptixImage2D都需要分配一块连续的设备内存作为data成员
+         */
+        args.rowStrideFloat4 = static_cast<unsigned int>(windowWidth * sizeof(float4));
+        args.rowStrideUchar4 = static_cast<unsigned int>(windowWidth * sizeof(uchar4));
+        args.windowWidth = windowWidth;
+        args.windowHeight = windowHeight;
+
+        //创建降噪器
+        const OptixDenoiserOptions denoiserOptions = {
+                .guideAlbedo = 1, //使用基础颜色和法线辅助信息
+                .guideNormal = 1,
+                .denoiseAlpha = OPTIX_DENOISER_ALPHA_MODE_COPY //不处理透明通道
+        };
+        optixCheckError(optixDenoiserCreate(
+                context, OPTIX_DENOISER_MODEL_KIND_LDR,
+                &denoiserOptions, &args.denoiser));
+
+        //初始化降噪器输入设备内存和OptiXImage
+        for (size_t i = 0; i < 3; i++) {
+            cudaCheckError(cudaMalloc(
+                    reinterpret_cast<void **>(&args.denoiserInputBuffers[i]),
+                    windowWidth * windowHeight * sizeof(float4)));
+            args.denoiserInputImages[i] = {
+                    .data = args.denoiserInputBuffers[i],
+                    .width = static_cast<unsigned int>(windowWidth),
+                    .height = static_cast<unsigned int>(windowHeight),
+                    .rowStrideInBytes = args.rowStrideFloat4,
+                    .pixelStrideInBytes = sizeof(float4),
+                    .format = OPTIX_PIXEL_FORMAT_FLOAT4
+            };
+        }
+
+        //分配降噪器执行所需设备内存
+        optixCheckError(optixDenoiserComputeMemoryResources(
+                args.denoiser,
+                windowWidth, windowHeight, &args.denoiserSizes));
+        cudaCheckError(cudaMalloc(
+                reinterpret_cast<void **>(&args.denoiserStateBuffer), args.denoiserSizes.stateSizeInBytes));
+        cudaCheckError(cudaMalloc(
+                reinterpret_cast<void **>(&args.denoiserScratchBuffer), args.denoiserSizes.withOverlapScratchSizeInBytes));
+
+        //分配输出内存，设置输出的OptiXImage
+        cudaCheckError(cudaMalloc(
+                reinterpret_cast<void **>(&args.denoiserOutputBuffer), windowWidth * windowHeight * sizeof(float4)));
+        args.denoiserOutputImage = {
+                .data = args.denoiserOutputBuffer,
+                .width = static_cast<unsigned int>(windowWidth),
+                .height = static_cast<unsigned int>(windowHeight),
+                .rowStrideInBytes = static_cast<unsigned int>(windowWidth * sizeof(float4)),
+                .pixelStrideInBytes = sizeof(float4),
+                .format = OPTIX_PIXEL_FORMAT_FLOAT4
+        };
+
+        //分配输出的uchar4内存
+        cudaCheckError(cudaMalloc(
+                reinterpret_cast<void **>(&args.denoiserDisplayBuffer),
+                windowWidth * windowHeight * sizeof(uchar4)));
+
+        //初始化降噪器
+        optixCheckError(optixDenoiserSetup(
+                args.denoiser, nullptr, windowWidth, windowHeight,
+                args.denoiserStateBuffer, args.denoiserSizes.stateSizeInBytes,
+                args.denoiserScratchBuffer, args.denoiserSizes.withOverlapScratchSizeInBytes));
+
+        //降噪参数
+        args.denoiserLayer = {
+                .input = args.denoiserInputImages[0],
+                .output = args.denoiserOutputImage
+        };
+        args.denoiserGuideLayer = {
+                .albedo = args.denoiserInputImages[1],
+                .normal = args.denoiserInputImages[2]
+        };
+        args.denoiserParams = {};
+
+        SDL_Log("Denoiser is ready.");
+        return args;
+    }
+
+    //将float4格式的surface转换为uchar4以供图形api渲染
+    __global__ void convertFloat4ToUchar4Kernel(const float4 * src, uchar4 * dst, unsigned int width, unsigned int height) {
+        const unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
+        const unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (x >= width || y >= height) { return; }
+        const unsigned int index = y * width + x;
+        dst[index] = colorToUchar4(src[index]);
+    }
+
+    void denoiseOutput(const DenoiserArgs & args, cudaArray_t outputCudaArray) {
+        //调用降噪器并等待降噪完成
+        optixCheckError(optixDenoiserInvoke(
+                args.denoiser, nullptr,
+                &args.denoiserParams,
+                args.denoiserStateBuffer, args.denoiserSizes.stateSizeInBytes,
+                &args.denoiserGuideLayer, &args.denoiserLayer, 1,
+                0, 0,
+                args.denoiserScratchBuffer, args.denoiserSizes.withOverlapScratchSizeInBytes));
+        cudaCheckError(cudaDeviceSynchronize());
+
+        //将降噪结果从线性内存中转换为uchar4并拷贝到输出surface
+        constexpr dim3 blockDim(16, 16, 1);
+        const dim3 gridDim(
+                (args.windowWidth + blockDim.x - 1) / blockDim.x,
+                (args.windowHeight + blockDim.y - 1) / blockDim.y, 1);
+
+        convertFloat4ToUchar4Kernel<<<gridDim, blockDim>>>(
+                reinterpret_cast<const float4 *>(args.denoiserOutputBuffer),
+                reinterpret_cast<uchar4 *>(args.denoiserDisplayBuffer),
+                static_cast<unsigned int>(args.windowWidth),
+                static_cast<unsigned int>(args.windowHeight));
+        cudaCheckError(cudaDeviceSynchronize());
+
+        cudaCheckError(cudaMemcpy2DToArray(
+                outputCudaArray, 0, 0,
+                reinterpret_cast<void *>(args.denoiserDisplayBuffer),
+                args.rowStrideUchar4,
+                args.rowStrideUchar4,
+                args.windowHeight,
+                cudaMemcpyDeviceToDevice));
+    }
+
+    void skipDenoise(const DenoiserArgs & args, const float4 * colorBuffer, cudaArray_t outputCudaArray) {
+        constexpr dim3 blockDim(16, 16, 1);
+        const dim3 gridDim(
+                (args.windowWidth + blockDim.x - 1) / blockDim.x,
+                (args.windowHeight + blockDim.y - 1) / blockDim.y, 1);
+
+        //直接将渲染器输出的colorBuffer转换并拷贝到输出
+        convertFloat4ToUchar4Kernel<<<gridDim, blockDim>>>(
+                colorBuffer,
+                reinterpret_cast<uchar4 *>(args.denoiserDisplayBuffer),
+                static_cast<unsigned int>(args.windowWidth),
+                static_cast<unsigned int>(args.windowHeight));
+        cudaCheckError(cudaDeviceSynchronize());
+
+        cudaCheckError(cudaMemcpy2DToArray(
+                outputCudaArray, 0, 0,
+                reinterpret_cast<void *>(args.denoiserDisplayBuffer),
+                args.rowStrideUchar4,
+                args.rowStrideUchar4,
+                args.windowHeight,
+                cudaMemcpyDeviceToDevice));
+    }
+
+    void freeDenoiserResources(DenoiserArgs & args) {
+        SDL_Log("Cleaning up denoiser resources...");
+
+        cudaCheckError(cudaFree(reinterpret_cast<void *>(args.denoiserOutputBuffer)));
+        cudaCheckError(cudaFree(reinterpret_cast<void *>(args.denoiserDisplayBuffer)));
+        for (size_t i = 0; i < 3; i++) {
+            cudaCheckError(cudaFree(reinterpret_cast<void *>(args.denoiserInputBuffers[i])));
+        }
+        args = {};
     }
 }

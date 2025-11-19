@@ -5,6 +5,8 @@
 
 //此文件定义的结构体中的参数仅一帧内有效
 namespace project {
+    constexpr unsigned int rayTraceDepth = 5;
+
     //几何体类型
     typedef enum class GeometryType {
         SPHERE, TRIANGLE, PARTICLE
@@ -16,8 +18,6 @@ namespace project {
     } MaterialType;
 
     //全局参数
-    constexpr unsigned int RAY_TRACE_DEPTH = 10;
-
     typedef struct GlobalParams {
         OptixTraversableHandle handle;
         curandState * stateArray;
@@ -26,7 +26,9 @@ namespace project {
     //raygen参数
     typedef struct RayGenParams {
         unsigned int width, height;
-        cudaSurfaceObject_t surfaceObject;
+        float4 * colorBuffer;
+        float4 * albedoBuffer;
+        float4 * normalBuffer;
 
         float3 cameraCenter;
         float3 cameraU, cameraV, cameraW;

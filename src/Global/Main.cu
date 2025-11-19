@@ -1,66 +1,37 @@
 #include <Global/Renderer.cuh>
+#include <Util/ProgramArgumentParser.cuh>
 using namespace project;
 
-namespace {
-    constexpr const char * seriesFilePath = "../files/";
-    constexpr const char * seriesFileName = "particle_mesh-middle.vtk.series";
-    constexpr const char * cacheFilePath = "../cache/";
-
-    void updateInstancesTransforms(OptixInstance * pin_instances, unsigned long long frameCount) {
-        float sphereTransform[12];
-        MathHelper::constructTransformMatrix(
-                {0.0f, 0.0f, -1000.5f},
-                {0.0f, 0.0f, 0.0f},
-                {1.0f, 1.0f, 1.0f}, sphereTransform);
-        memcpy(pin_instances[0].transform, sphereTransform, 12 * sizeof(float));
-    }
+static std::vector<std::array<float, 12>> instanceTransforms;
+static void updateInstancesTransforms(
+        OptixInstance * pin_instances, size_t instanceCount, unsigned long long frameCount)
+{
+    memcpy(pin_instances[0].transform, instanceTransforms[0].data(), 12 * sizeof(float));
 }
 
 #undef main
 int main(int argc, char * argv[]) {
-    //额外几何体
-    const std::vector<Sphere> spheres = {
-            {float3{0.0f, 0.0f, 0.0f}, 1000.0f},
-    };
-    const std::vector<MaterialIndex> sphereMaterialIndices = {
-            {MaterialType::ROUGH, 3}
-    };
-    GeometryData geoData = {
-            .spheres = {spheres},
-            .sphereMaterialIndices = sphereMaterialIndices
-    };
+    //解析JSON参数
+    auto [geoData, matData, loopData, transforms,
+          seriesFilePath, seriesFileName, cacheFilePath,
+          isWriteCache, isDebugMode,
+          cacheProcessThreadCount] = ProgramArgumentParser::parseProgramArguments();
+    maxCacheLoadThreadCount = std::max<size_t>(1, cacheProcessThreadCount);
+    if (isWriteCache) {
+        Renderer::writeCacheFilesAndExit(seriesFilePath, seriesFileName, cacheFilePath);
+    }
+    instanceTransforms = transforms;
 
-    //额外材质
-    const std::vector<float3> roughs = {
-            {.65, .05, .05},
-            {.73, .73, .73},
-            {.12, .45, .15},
-            {.70, .60, .50},
-    };
-    const std::vector<std::pair<float3, float>> metals = {
-            {{0.8f, 0.85f, 0.88f}, 0.0f},
-    };
-    MaterialData matData = {
-            .roughs = roughs,
-            .metals = metals
-    };
+    //提交几何体，粒子文件信息和材质数据
+    auto data = Renderer::commitRendererData(
+            geoData, matData,
+            seriesFilePath, seriesFileName, cacheFilePath, isDebugMode);
+    Renderer::setAddGeoInsUpdateFunc(data, &updateInstancesTransforms);
 
-//#define GENERATE_CACHE_AND_EXIT
-#ifdef GENERATE_CACHE_AND_EXIT
-    writeCacheFilesAndExit(seriesFilePath, seriesFileName, cacheFilePath);
-#endif
+    //启动交互
+    Renderer::startRender(data, loopData);
 
-    auto data = commitRendererData(geoData, matData, seriesFilePath, seriesFileName, cacheFilePath);
-    setAddGeoInsUpdateFunc(data, updateInstancesTransforms);
-    const RenderLoopData loopData(
-            SDL_GraphicsWindowAPIType::OPENGL, 1200, 800,
-            "Test", 60,
-            {5.0f, 0.0f, 0.0f},
-            {0.0f, 0.0f, 0.0f},
-            {0.0f, 0.0f, 1.0f},
-            4);
-    startRender(data, loopData);
-    freeRendererData(data);
-
+    //清理资源
+    Renderer::freeRendererData(data);
     return 0;
 }
