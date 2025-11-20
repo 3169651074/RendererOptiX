@@ -35,18 +35,20 @@ include_directories("${OPTIX_ROOT}/include")
 #SDL
 if (WIN32)
     #需要将SDL.dll复制到可执行文件目录下
-    set(SDL2_DIR "${CMAKE_SOURCE_DIR}/lib/SDL2/cmake")
+    set(SDL2_DIR "${CMAKE_SOURCE_DIR}/lib/SDL-2.32.10/cmake")
+    set(SDL2_ttf_DIR "${CMAKE_SOURCE_DIR}/lib/SDL_ttf-2.24.0/cmake")
 else ()
-    #Linux使用系统包管理器安装libsdl2-dev
+    #Linux使用系统包管理器安装libsdl2-dev libsdl2-ttf-dev
 endif ()
 find_package(SDL2 REQUIRED)
+find_package(SDL2_ttf REQUIRED)
 
 #VK
 find_package(Vulkan REQUIRED)
 include_directories("${Vulkan_INCLUDE_DIRS}")
 
 #VTK
-set(VTK_DIR "${CMAKE_SOURCE_DIR}/lib/VTK9.5.2/lib/cmake/vtk-9.5")
+set(VTK_DIR "${CMAKE_SOURCE_DIR}/lib/VTK-9.5.2/lib/cmake/vtk-9.5")
 find_package(VTK REQUIRED)
 
 #OptiX着色器文件列表
@@ -125,7 +127,7 @@ if (WIN32)
 endif ()
 
 #SDL
-target_link_libraries(${EXECUTABLE_NAME} PUBLIC SDL2::SDL2 SDL2::SDL2main)
+target_link_libraries(${EXECUTABLE_NAME} PUBLIC SDL2::SDL2 SDL2::SDL2main SDL2_ttf::SDL2_ttf)
 
 #VK
 target_link_libraries(${EXECUTABLE_NAME} PUBLIC Vulkan::Vulkan)

@@ -1301,11 +1301,11 @@ namespace {
 
         const auto vkGetSemaphoreFdKHR = (PFN_vkGetSemaphoreFdKHR)vkGetDeviceProcAddr(logicalDevice, "vkGetSemaphoreFdKHR");
         int semFd1, semFd2;
-        vkCheckError(vkGetSemaphoreWin32HandleKHR(
-                logicalDevice, &semaphoreGetHandleInfo1, &semFd1
+        vkCheckError(vkGetSemaphoreFdKHR(
+                logicalDevice, &semaphoreGetFdInfo1, &semFd1
         ));
-        vkCheckError(vkGetSemaphoreWin32HandleKHR(
-                logicalDevice, &semaphoreGetHandleInfo2, &semFd2
+        vkCheckError(vkGetSemaphoreFdKHR(
+                logicalDevice, &semaphoreGetFdInfo2, &semFd2
         ));
 #endif
 

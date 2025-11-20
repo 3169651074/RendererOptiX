@@ -93,6 +93,7 @@ namespace project {
     }
 
     //D3D
+#ifdef _WIN32
     void _D3DCheckError(HRESULT result, const char * file, const char * function, int line) {
         if (FAILED(result)) {
             WCHAR * errorText = nullptr;
@@ -114,6 +115,7 @@ namespace project {
             exit(D3D_ERROR_EXIT_CODE);
         }
     }
+#endif
 
     // ====== 随机数生成函数 ======
 

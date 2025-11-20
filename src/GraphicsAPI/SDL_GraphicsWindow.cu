@@ -224,6 +224,7 @@ namespace project {
                 args.cudaSurfaceObject = args.vkArgs.cudaSurface;
                 args.cudaArray = args.vkArgs.cudaArray;
                 break;
+#ifdef _WIN32
             case SDL_GraphicsWindowAPIType::DIRECT3D11:
                 args.cudaSurfaceObject = SDL_D3D11MapCudaResource(args.d3d11Args);
                 cudaCheckError(cudaGraphicsSubResourceGetMappedArray(&args.cudaArray, args.d3d11Args.cudaResource, 0, 0));
@@ -233,6 +234,7 @@ namespace project {
                 args.cudaSurfaceObject = args.d3d12Args.cudaSurfaces[args.d3d12Args.frameIndex];
                 args.cudaArray = args.d3d12Args.cudaArrays[args.d3d12Args.frameIndex];
                 break;
+                #endif
             default:;
         }
         return {args.cudaArray, args.cudaSurfaceObject};

@@ -118,6 +118,14 @@ namespace project {
                 const auto loopData = data["loop-data"];
                 const std::string apiTypeStr = loopData["api"].get<std::string>();
                 SDL_GraphicsWindowAPIType apiType;
+                //平台检查：Linux不支持D3D11/D3D12
+#ifndef _WIN32
+                if (apiTypeStr == "D3D11" || apiTypeStr == "D3D12") {
+                    SDL_Log("Error: Direct3D (D3D11/D3D12) is only supported on Windows!");
+                    SDL_Log("Please use \"OGL\" or \"VK\" instead.");
+                    exit(COMMAND_PARSER_ERROR_EXIT_CODE);
+                }
+#endif
                 if (apiTypeStr == "OGL") {
                     apiType = SDL_GraphicsWindowAPIType::OPENGL;
                 } else if (apiTypeStr == "VK") {

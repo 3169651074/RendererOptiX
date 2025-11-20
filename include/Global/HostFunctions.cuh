@@ -18,8 +18,15 @@
 #endif
 
 //SDL
+#ifdef _WIN32
+#include <SDL.h>
+#include <SDL_syswm.h>
+#include <SDL_ttf.h>
+#else
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
+#include <SDL2/SDL_ttf.h>
+#endif
 
 //CUDA
 #include <cuda_runtime.h>
@@ -44,7 +51,9 @@
 #ifdef _WIN32
 #include <vulkan/vulkan_win32.h>
 #else
-#include <unistd.h>
+#include <vulkan/vulkan_xlib.h>
+#include <vulkan/vulkan_xcb.h>
+#include <vulkan/vulkan_wayland.h>
 #endif
 
 //D3D
@@ -161,9 +170,11 @@ namespace project {
             const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void * pUserData);
 
     //D3D
+#ifdef _WIN32
     #define D3D_ERROR_EXIT_CODE (-500)
     extern void _D3DCheckError(HRESULT result, const char * file, const char * function, int line);
 #define D3DCheckError(result) _D3DCheckError(result, __FILE__, __func__, __LINE__)
+#endif
 
     // ====== 辅助宏 ======
 #define lengthOf(cArrayInPlace) (sizeof(cArrayInPlace) / sizeof(cArrayInPlace[0]))
