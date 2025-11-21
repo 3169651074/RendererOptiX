@@ -1,9 +1,8 @@
-cmake-build-debug/
-cmake-build-debug-visual-studio/
-cache/
-!cache/.gitkeep
 .idea/
-bin/
+cmake-build-debug*/
+!cache/.gitkeep
+cache/
 !bin/.gitkeep
+bin/
 .vs/
 .vscode/
