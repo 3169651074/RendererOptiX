@@ -4,7 +4,10 @@
 
 ### 1. 准备 VTK 数据
 
-确保您有 VTK 序列文件（`.vtk.series`）和对应的 VTK 数据文件。VTK 序列文件是一个 JSON 格式的文件，列出了要渲染的 VTK 文件序列。
+渲染器需要以下输入数据：
+- 一个.vtk.series序列文件
+- 一组.vtk文件，或一组.cache缓存文件
+- config.json配置文件
 
 ### 2. 配置项目
 

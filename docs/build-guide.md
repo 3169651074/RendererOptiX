@@ -6,7 +6,7 @@
 
 - **GPU**：NVIDIA GPU，支持 CUDA 和 OptiX
   - 推荐：RTX 20 系列或更高
-  - 最低：支持 CUDA Compute Capability 7.0+
+  - 最低：支持 CUDA Compute Capability 7.0+（sm_70）
 - **内存**：至少 8GB RAM（推荐 16GB 或更多）
 - **显存**：至少 8GB（推荐 12GB 或更多，取决于VTK粒子规模）
 
@@ -17,13 +17,13 @@
 - **操作系统**：Windows 10 (1903+) 或 Windows 11
 - **编译器**：Visual Studio 2019 或更高版本（支持 C++20）
 - **CMake**：4.0 或更高版本
-- **CUDA Toolkit**：与 OptiX 9.0.0 兼容的版本（推荐 11.0+）
+- **CUDA Toolkit**：12.0+
 - **NVIDIA OptiX SDK**：9.0.0
 - **Vulkan SDK**: 1.1及以上
 
 #### Linux
 
-- **操作系统**：Ubuntu 20.04+ 或类似发行版
+- **操作系统**：Ubuntu 22.04+ 或类似发行版，此文档为Debian系发行版提供构建指南
 - **编译器**：GCC 10+ 或 Clang 12+（支持 C++20）
 - **CMake**：4.0 或更高版本
 - **CUDA Toolkit**：与 OptiX 9.0.0 兼容的版本

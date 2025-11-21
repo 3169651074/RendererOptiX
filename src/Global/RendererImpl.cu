@@ -264,7 +264,7 @@ namespace project {
                 .debugLevel = isDebugMode ? OPTIX_COMPILE_DEBUG_LEVEL_FULL : OPTIX_COMPILE_DEBUG_LEVEL_NONE
         };
         SDL_Log("Reading compiled PTX...");
-        const std::string optixShader = FileHelper::readTextFile("../shader/shader.ptx");
+        const std::string optixShader = FileHelper::readTextFile("../shader/Shader.ptx");
         if (!optixShader.empty()) {
             SDL_Log("Read PTX string:\n%s...", optixShader.substr(0, 200).c_str());
         } else {

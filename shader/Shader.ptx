@@ -681,7 +681,7 @@ $L__BB0_23:
 	// begin inline asm
 	call (%r217), _optix_get_payload, (%r58);
 	// end inline asm
-	setp.ltu.f32 	%p1, %f1, 0f41200000;
+	setp.ltu.f32 	%p1, %f1, 0f40A00000;
 	@%p1 bra 	$L__BB2_2;
 	bra.uni 	$L__BB2_1;
 
@@ -1094,7 +1094,7 @@ $L__BB2_22:
 	// begin inline asm
 	call (%r217), _optix_get_payload, (%r58);
 	// end inline asm
-	setp.ltu.f32 	%p1, %f1, 0f41200000;
+	setp.ltu.f32 	%p1, %f1, 0f40A00000;
 	@%p1 bra 	$L__BB3_2;
 	bra.uni 	$L__BB3_1;
 
@@ -1529,7 +1529,7 @@ $L__BB3_26:
 	// begin inline asm
 	call (%r220), _optix_get_payload, (%r58);
 	// end inline asm
-	setp.ltu.f32 	%p1, %f1, 0f41200000;
+	setp.ltu.f32 	%p1, %f1, 0f40A00000;
 	@%p1 bra 	$L__BB4_2;
 	bra.uni 	$L__BB4_1;
 
@@ -1960,7 +1960,7 @@ $L__BB4_22:
 	// begin inline asm
 	call (%r220), _optix_get_payload, (%r58);
 	// end inline asm
-	setp.ltu.f32 	%p1, %f1, 0f41200000;
+	setp.ltu.f32 	%p1, %f1, 0f40A00000;
 	@%p1 bra 	$L__BB5_2;
 	bra.uni 	$L__BB5_1;
 

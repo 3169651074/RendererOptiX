@@ -31,7 +31,7 @@ namespace project {
         //读取series文件及其引用的所有VTK文件数据，将数据写入缓存文件后退出程序，每个VTK文件对应一个缓存文件
         static void writeVTKDataCache(
                 const std::string & seriesFilePath, const std::string & seriesFileName,
-                const std::string & cacheFilePath);
+                const std::string & cacheFilePath, size_t maxCacheLoadThreadCount);
 
         //读取单个缓存文件信息，由子线程执行
         //此函数将粒子顶点和法线数据拷贝至设备内存，需要在渲染结束后释放

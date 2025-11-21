@@ -21,11 +21,9 @@
 #ifdef _WIN32
 #include <SDL.h>
 #include <SDL_syswm.h>
-#include <SDL_ttf.h>
 #else
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
-#include <SDL2/SDL_ttf.h>
 #endif
 
 //CUDA
@@ -34,9 +32,9 @@
 
 //OPTIX
 #include <optix.h>
+#include <optix_host.h>
 #include <optix_device.h>
 #include <optix_function_table.h>
-#include <optix_host.h>
 #include <optix_stack_size.h>
 #include <optix_stubs.h>
 
@@ -51,9 +49,9 @@
 #ifdef _WIN32
 #include <vulkan/vulkan_win32.h>
 #else
-#include <vulkan/vulkan_xlib.h>
-#include <vulkan/vulkan_xcb.h>
-#include <vulkan/vulkan_wayland.h>
+// #include <vulkan/vulkan_xlib.h>
+// #include <vulkan/vulkan_xcb.h>
+// #include <vulkan/vulkan_wayland.h>
 #endif
 
 //D3D
@@ -85,6 +83,10 @@ using namespace Microsoft::WRL;
 #include <vector>
 #include <stack>
 #include <deque>
+#include <list>
+#include <queue>
+#include <unordered_set>
+#include <unordered_map>
 
 #include <cmath>
 #include <cstring>
@@ -93,6 +95,8 @@ using namespace Microsoft::WRL;
 #include <random>
 #include <chrono>
 #include <thread>
+#include <fstream>
+#include <sstream>
 
 namespace project {
     // ====== 随机数生成函数 ======

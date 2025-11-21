@@ -169,7 +169,7 @@ namespace project {
     RendererData Renderer::commitRendererData(
             GeometryData & addGeoData, MaterialData & addMatData,
             const std::string & seriesFilePath, const std::string & seriesFileName,
-            const std::string & cacheFilePath, bool isDebugMode)
+            const std::string & cacheFilePath, bool isDebugMode, size_t maxCacheLoadThreadCount)
     {
         SDL_Log("Loading renderer data...");
         RendererData data = {
@@ -498,9 +498,9 @@ namespace project {
 
     void Renderer::writeCacheFilesAndExit(
             const std::string & seriesFilePath, const std::string & seriesFileName,
-            const std::string & cacheFilePath)
+            const std::string & cacheFilePath, size_t maxCacheLoadThreadCount)
     {
-        VTKReader::writeVTKDataCache(seriesFilePath, seriesFileName, cacheFilePath);
+        VTKReader::writeVTKDataCache(seriesFilePath, seriesFileName, cacheFilePath, maxCacheLoadThreadCount);
         exit(0);
     }
 

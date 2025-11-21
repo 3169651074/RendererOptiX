@@ -2,9 +2,6 @@
 using namespace project;
 
 //C++
-#include <fstream>
-#include <sstream>
-#include <thread>
 #include <atomic>
 #include <filesystem>
 namespace filesystem = std::filesystem; //using用于类型别名，不能用于命名空间别名
@@ -13,156 +10,31 @@ namespace filesystem = std::filesystem; //using用于类型别名，不能用于
 #include <JSON/json.hpp>
 using json = nlohmann::json;
 
-//VTK
-#include <vtkSmartPointer.h>
-#include <vtkPolyData.h>
-#include <vtkPolyDataReader.h>
-#include <vtkCellData.h>
-#include <vtkDataArray.h>
-#include <vtkFieldData.h>
-#include <vtkCell.h>
-#include <vtkCellTypes.h>
-#include <vtkPolyDataNormals.h>
-#include <vtkPointData.h>
-
 #define checkStreamOpen(io, path)\
-    do {                     \
-        if (!io.is_open()) { \
+    do {                         \
+        if (!io.is_open()) {     \
             SDL_Log("Failed to open file: %s!", (path).c_str());\
             exit(VTK_READER_ERROR_EXIT_CODE);\
-        }                    \
+        }                        \
     } while (false)
 
-namespace {
-    //检查VTK文件头
-    void checkVTKFileHeader(const std::string & filePath) {
-        std::ifstream vtkFile(filePath);
-        checkStreamOpen(vtkFile, filePath);
-        std::string line;
-        getline(vtkFile, line);
-        if (line.find("# vtk DataFile Version") == std::string::npos) {
-            SDL_Log("Illegal vtk file header in file %s: %s!", filePath.c_str(), line.c_str());
-            exit(VTK_READER_ERROR_EXIT_CODE);
-        }
-        vtkFile.close();
-    }
-
+/*
+ * 在Ubuntu上，VTK头文件使用nvcc编译时可能会报错，原因为nvcc不支持VTK所使用的C++高级特性
+ * 因此需要将VTK源代码使用GCC进行编译
+ * 由于此文件（VTKReader.cu）由于头文件链式包含，已经包含了OptiX头文件，而OptiX头文件必须使用nvcc进行编译
+ * 则需要将使用VTK函数的部分单独放到一个.cpp文件中
+ */
+namespace vtk_reader {
     //读取单个VTK文件，返回[id数组，速度数组，顶点二维数组，法线二维数组]
     //顶点、法线二维数组中每个一维数组存储一个粒子的所有顶点和法线
     std::tuple<
             std::vector<size_t>, std::vector<float3>,
             std::vector<std::vector<float3>>, std::vector<std::vector<float3>>
-    > readVTKFile(const std::string & filePath, std::atomic<size_t> & maxCellCountSingleFile) {
-        std::vector<size_t> ids;
-        std::vector<float3> velocities;
-        std::vector<std::vector<float3>> verticesThisFile, normalsThisFile;
+    > readVTKFile(const std::string & filePath, std::atomic<size_t> & maxCellCountSingleFile);
+}
 
-        //获取vtkPolyData指针
-        vtkSmartPointer<vtkPolyDataReader> reader = vtkSmartPointer<vtkPolyDataReader>::New();
-        reader->SetFileName(filePath.c_str());
-        reader->Update();
-        vtkPolyData * polyData = reader->GetOutput();
-        if (polyData == nullptr || polyData->GetNumberOfPoints() == 0) {
-            SDL_Log("Failed to get poly data pointer or there is no points in file!");
-            exit(VTK_READER_ERROR_EXIT_CODE);
-        }
-        const vtkIdType cellCount = polyData->GetNumberOfCells();
-        maxCellCountSingleFile = std::max<size_t>(maxCellCountSingleFile, cellCount);
-
-        //读取几何数据
-        vtkCellData * cellData = polyData->GetCellData();
-        vtkDataArray * idArray = cellData ? cellData->GetArray("id") : nullptr;
-        vtkDataArray * velArray = cellData ? cellData->GetArray("vel") : nullptr;
-        if (cellData == nullptr || idArray == nullptr || velArray == nullptr) {
-            SDL_Log("Failed to read cell data!");
-            exit(VTK_READER_ERROR_EXIT_CODE);
-        }
-
-        //计算全局顶点法向量
-        vtkNew<vtkPolyDataNormals> normalsFilter;
-        normalsFilter->SetInputData(polyData);
-        normalsFilter->SetComputePointNormals(true); //计算顶点法向量
-        normalsFilter->SetComputeCellNormals(false); //不计算面法向量
-        normalsFilter->SetSplitting(false);          //不要因为法线差异而分裂顶点
-        normalsFilter->SetConsistency(true);         //尝试使所有法线方向一致
-        normalsFilter->SetAutoOrientNormals(true);   //将法向量定向到外侧
-        normalsFilter->Update();
-
-        vtkDataArray * vtkDataNormals = normalsFilter->GetOutput()->GetPointData()->GetNormals();
-        vtkPoints * meshPoints = polyData->GetPoints();
-
-        //逐个Cell读取
-        for (vtkIdType i = 0; i < cellCount; i++) {
-            //获取Cell作为独立几何对象
-            vtkCell * cell = polyData->GetCell(i);
-
-            //检查几何类型是否为vtkTriangleStrip
-            if (strcmp(vtkCellTypes::GetClassNameFromTypeId(cell->GetCellType()), "vtkTriangleStrip") != 0) {
-                SDL_Log("Found illegal cell type: %s!", vtkCellTypes::GetClassNameFromTypeId(cell->GetCellType()));
-                exit(VTK_READER_ERROR_EXIT_CODE);
-            }
-
-            //ID
-            ids.push_back(static_cast<size_t>(idArray->GetTuple1(i)));
-
-            //速度
-            const double * vel = velArray->GetTuple3(i);
-            velocities.push_back({
-                static_cast<float>(vel[0]),
-                static_cast<float>(vel[1]),
-                static_cast<float>(vel[2]),
-            });
-
-            //读取该Cell的所有顶点坐标和法向量
-            vtkIdList * pointIds = cell->GetPointIds();
-            const vtkIdType cellPointCount = cell->GetNumberOfPoints();
-
-            //一个 TriangleStrip 会生成cellPointCount - 2个三角形
-            const size_t triangleCount = cellPointCount - 2;
-            std::vector<float3> verticesThisCell, normalsThisCell;
-            verticesThisCell.reserve(triangleCount * 3); normalsThisCell.reserve(triangleCount * 3);
-
-            for (vtkIdType triangleIndex = 0; triangleIndex < triangleCount; triangleIndex++) {
-                /*
-                 * 根据三角形索引调整顶点顺序
-                 * 偶数三角形：正常顺序 (v_i, v_{i+1}, v_{i+2})
-                 * 奇数三角形：翻转顺序 (v_{i}, v_{i+2}, v_{i+1})
-                 */
-                std::array<vtkIdType, 3> trianglePointIndexes = {
-                        pointIds->GetId(triangleIndex + 0),
-                        pointIds->GetId(triangleIndex + 1),
-                        pointIds->GetId(triangleIndex + 2)
-                };
-                if ((triangleIndex & 1) != 0) {
-                    std::swap(trianglePointIndexes[1], trianglePointIndexes[2]);
-                }
-
-                //添加三个顶点和法线
-                for (vtkIdType pointIdx: trianglePointIndexes) {
-                    double coords[3];
-                    meshPoints->GetPoint(pointIdx, coords);
-                    verticesThisCell.push_back({
-                        static_cast<float>(coords[0]),
-                        static_cast<float>(coords[1]),
-                        static_cast<float>(coords[2])
-                    });
-                    double normal[3];
-                    vtkDataNormals->GetTuple(pointIdx, normal);
-                    normalsThisCell.push_back({
-                        static_cast<float>(normal[0]),
-                        static_cast<float>(normal[1]),
-                        static_cast<float>(normal[2])
-                    });
-                }
-            }
-
-            //将顶点数组和法线数组移动到文件全局数组
-            verticesThisFile.push_back(std::move(verticesThisCell));
-            normalsThisFile.push_back(std::move(normalsThisCell));
-        }
-        return {ids, velocities, verticesThisFile, normalsThisFile};
-    }
-
+//所有写入文件的大小均使用固定长度的uint64_t
+namespace {
     //子线程函数：读取VTK文件，将其转换为渲染器粒子数组，并写入缓存文件
     void writeVTKFileCache(
             size_t totalFileCount, const std::string & vtkFilePathName,
@@ -170,7 +42,9 @@ namespace {
             std::atomic<size_t> & maxCellCountSingleFile)
     {
         //读取VTK粒子数组
-        const auto [ids, velocities, verticesThisFile, normalsThisFile] = readVTKFile(vtkFilePathName, maxCellCountSingleFile);
+        const auto [ids, velocities,
+                    verticesThisFile, normalsThisFile]
+                    = vtk_reader::readVTKFile(vtkFilePathName, maxCellCountSingleFile);
 
         //打开数据文件
         std::ofstream out(cacheFilePathName, std::ios::out | std::ios::binary);
@@ -179,19 +53,19 @@ namespace {
         out.rdbuf()->pubsetbuf(outBuffer, sizeof(outBuffer));
 
         //写入粒子数量
-        const size_t particleCount = ids.size();
-        out.write(reinterpret_cast<const char *>(&particleCount), sizeof(size_t));
+        const uint64_t particleCount = ids.size();
+        out.write(reinterpret_cast<const char *>(&particleCount), sizeof(uint64_t));
 
         for (size_t i = 0; i < particleCount; i++) {
             //写入粒子基础信息
-            const size_t & id = ids[i];
-            out.write(reinterpret_cast<const char *>(&id), sizeof(size_t));
+            const uint64_t & id = ids[i];
+            out.write(reinterpret_cast<const char *>(&id), sizeof(uint64_t));
             const float3 & vel = velocities[i];
             out.write(reinterpret_cast<const char *>(&vel), sizeof(float3));
 
             //写入此粒子的顶点/法线数量
-            const size_t vertexCountThisCell = verticesThisFile[i].size();
-            out.write(reinterpret_cast<const char *>(&vertexCountThisCell), sizeof(size_t));
+            const uint64_t vertexCountThisCell = verticesThisFile[i].size();
+            out.write(reinterpret_cast<const char *>(&vertexCountThisCell), sizeof(uint64_t));
 
             //写入顶点数组和法线数组
             out.write(reinterpret_cast<const char *>(verticesThisFile[i].data()), static_cast<std::streamsize>(vertexCountThisCell * sizeof(float3)));
@@ -273,7 +147,7 @@ namespace project {
 
     void VTKReader::writeVTKDataCache(
             const std::string & seriesFilePath, const std::string & seriesFileName,
-            const std::string & cacheFilePath)
+            const std::string & cacheFilePath, size_t maxCacheLoadThreadCount)
     {
         SDL_Log("Generating VTK data cache...");
 
@@ -321,7 +195,7 @@ namespace project {
         }
 
         //将所有文件最大Cell数量耗时较长写入独立文件用于快速构造材质数组，同时使得材质构造较为灵活
-        const auto maxCellCount = maxCellCountSingleFile.load(std::memory_order_relaxed);
+        const auto maxCellCount = static_cast<uint64_t>(maxCellCountSingleFile.load(std::memory_order_relaxed));
         SDL_Log("Max cell count in a single VTK file: %zd.", maxCellCount);
         std::ofstream metaData(cacheFilePath + "metadata.cache", std::ios::out);
         if (!metaData.is_open()) {
@@ -342,8 +216,8 @@ namespace project {
         in.rdbuf()->pubsetbuf(inBuffer, sizeof(inBuffer));
 
         //读取粒子数量
-        size_t particleCount;
-        in.read(reinterpret_cast<char *>(&particleCount), sizeof(size_t));
+        uint64_t particleCount;
+        in.read(reinterpret_cast<char *>(&particleCount), sizeof(uint64_t));
 
         std::vector<RendererParticle> particles; particles.reserve(particleCount);
         std::vector<float3> verticesThisCell, normalsThisCell;
@@ -351,16 +225,16 @@ namespace project {
         //逐个读取每个粒子信息
         for (size_t i = 0; i < particleCount; i++) {
             //ID
-            size_t id;
-            in.read(reinterpret_cast<char *>(&id), sizeof(size_t));
+            uint64_t id;
+            in.read(reinterpret_cast<char *>(&id), sizeof(uint64_t));
 
             //速度
             float3 velocity;
             in.read(reinterpret_cast<char *>(&velocity), sizeof(float3));
 
             //顶点/法线数量
-            size_t vertexCount;
-            in.read(reinterpret_cast<char *>(&vertexCount), sizeof(size_t));
+            uint64_t vertexCount;
+            in.read(reinterpret_cast<char *>(&vertexCount), sizeof(uint64_t));
 
             //顶点和法线数组（需要resize以接收来自流的数据，无需清理原有内容）
             verticesThisCell.resize(vertexCount); normalsThisCell.resize(vertexCount);
@@ -376,7 +250,7 @@ namespace project {
             cudaCheckError(cudaMemcpy(dev_normals, normalsThisCell.data(), vertexCount * sizeof(float3), cudaMemcpyHostToDevice));
 
             particles.push_back({
-                .id = id,
+                .id = static_cast<size_t>(id),
                 .velocity = velocity,
                 .dev_vertices = dev_vertices,
                 .dev_normals = dev_normals,
@@ -400,7 +274,7 @@ namespace project {
     size_t VTKReader::readMaxCellCountAllVTKFile(const std::string & cacheFilePath) {
         std::ifstream metaData(cacheFilePath + "metadata.cache", std::ios::in);
         checkStreamOpen(metaData, cacheFilePath + "metadata.cache");
-        size_t maxCount;
+        uint64_t maxCount;
         metaData >> maxCount;
         metaData.close();
 

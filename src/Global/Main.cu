@@ -1,4 +1,3 @@
-#include <Global/Renderer.cuh>
 #include <Util/ProgramArgumentParser.cuh>
 using namespace project;
 
@@ -16,16 +15,17 @@ int main(int argc, char * argv[]) {
           seriesFilePath, seriesFileName, cacheFilePath,
           isWriteCache, isDebugMode,
           cacheProcessThreadCount] = ProgramArgumentParser::parseProgramArguments();
-    maxCacheLoadThreadCount = std::max<size_t>(1, cacheProcessThreadCount);
+    const size_t maxCacheLoadThreadCount = std::max<size_t>(1, cacheProcessThreadCount);
     if (isWriteCache) {
-        Renderer::writeCacheFilesAndExit(seriesFilePath, seriesFileName, cacheFilePath);
+        Renderer::writeCacheFilesAndExit(seriesFilePath, seriesFileName, cacheFilePath, maxCacheLoadThreadCount);
     }
     instanceTransforms = transforms;
 
     //提交几何体，粒子文件信息和材质数据
     auto data = Renderer::commitRendererData(
             geoData, matData,
-            seriesFilePath, seriesFileName, cacheFilePath, isDebugMode);
+            seriesFilePath, seriesFileName, cacheFilePath,
+            isDebugMode, maxCacheLoadThreadCount);
     Renderer::setAddGeoInsUpdateFunc(data, &updateInstancesTransforms);
 
     //启动交互

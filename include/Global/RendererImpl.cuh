@@ -5,9 +5,6 @@
 #include <Global/Shader.cuh>
 
 namespace project {
-    //缓存读写最大并发线程数
-    extern size_t maxCacheLoadThreadCount;
-
     //着色器绑定表数据类型
     template <typename T>
     struct SbtRecord {

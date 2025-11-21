@@ -2,11 +2,23 @@ cmake_minimum_required(VERSION 4.0)
 set(EXECUTABLE_NAME "RendererOptiX")
 
 #CUDA
-if (UNIX)
-    set(CMAKE_CUDA_COMPILER "/usr/local/cuda/bin/nvcc")
+if (WIN32)
+    set(CMAKE_CUDA_COMPILER
+            "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0/bin/nvcc.exe" CACHE STRING
+            "Absolute path of cuda compiler (nvcc)")
+    set(CUDA_INCLUDE_DIR
+            "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0/include" CACHE STRING
+            "Absolute path of cuda include directory")
 else ()
-    #Windows使用CUDA安装时自动设置的环境变量
+    set(CMAKE_CUDA_COMPILER
+            "/usr/local/cuda/bin/nvcc" CACHE STRING
+            "Absolute path of cuda compiler (nvcc)")
+    set(CUDA_INCLUDE_DIR
+            "/usr/local/cuda/include" CACHE STRING
+            "Absolute path of cuda include directory")
 endif ()
+include_directories(${CUDA_INCLUDE_DIR})
+message(STATUS "NVCC Path: " ${CONFIG_CMAKE_CUDA_COMPILER})
 
 #自动检测GPU的计算能力标准
 set(CMAKE_CUDA_ARCHITECTURES native)
@@ -22,33 +34,57 @@ include_directories("${CMAKE_SOURCE_DIR}/include")
 set(EXECUTABLE_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin")
 
 #OptiX
-set(OPTIX_VERSION "9.0.0")
-if (UNIX)
-    #需要将整个OptiX安装文件夹复制到用户桌面
-    set(OPTIX_ROOT "~/Desktop/CUDA/NVIDIA-OptiX-SDK-${OPTIX_VERSION}-linux64-x86_64")
+if (WIN32)
+    set(OPTIX_ROOT "C:/ProgramData/NVIDIA Corporation/OptiX SDK 9.0.0" CACHE STRING
+            "Absolute path of OptiX SDK")
 else ()
-    #使用默认安装目录
-    set(OPTIX_ROOT "C:/ProgramData/NVIDIA Corporation/OptiX SDK ${OPTIX_VERSION}")
+    set(OPTIX_ROOT "~/Public/NVIDIA-OptiX-SDK-9.0.0-linux64-x86_64" CACHE STRING
+            "Absolute path of OptiX SDK")
 endif ()
+message(STATUS "OptiX Root Directory: " ${OPTIX_ROOT})
 include_directories("${OPTIX_ROOT}/include")
 
 #SDL
 if (WIN32)
-    #需要将SDL.dll复制到可执行文件目录下
-    set(SDL2_DIR "${CMAKE_SOURCE_DIR}/lib/SDL-2.32.10/cmake")
-    set(SDL2_ttf_DIR "${CMAKE_SOURCE_DIR}/lib/SDL_ttf-2.24.0/cmake")
+    #需要将SDL2.dll复制到可执行文件目录下
+    set(SDL2_DIR "C:/SDL-2.32.10-MSVC/cmake")
 else ()
-    #Linux使用系统包管理器安装libsdl2-dev libsdl2-ttf-dev
+    #Linux使用系统包管理器安装libsdl2-dev
+    #仍然提供一个可选的根目录设置，以防用户手动编译
+    set(CONFIG_SDL_DIR "" CACHE STRING
+            "Absolute path to the root directory of the SDL2 library (not needed if using system package)")
+
+    #如果用户提供了路径，则使用它来辅助 find_package
+    if (CONFIG_SDL_DIR)
+        set(SDL2_DIR "${CONFIG_SDL_DIR}/lib/cmake/SDL2")
+    endif()
 endif ()
 find_package(SDL2 REQUIRED)
-find_package(SDL2_ttf REQUIRED)
 
 #VK
+if (WIN32)
+    set(CONFIG_VULKAN_SDK_PATH "C:/VulkanSDK/1.4.328.1" CACHE STRING
+            "Absolute path of vulkan SDK")
+else ()
+    set(CONFIG_VULKAN_SDK_PATH "~/Public/vulkan-1.4.328.1/x86_64" CACHE STRING
+            "Absolute path of vulkan SDK")
+    #需要额外设置运行时环境变量
+    set(ENV{VULKAN_SDK} ${CONFIG_VULKAN_SDK_PATH})
+    set(ENV{VK_LAYER_PATH} "${CONFIG_VULKAN_SDK_PATH}/etc/vulkan/explicit_layer.d")
+endif ()
 find_package(Vulkan REQUIRED)
 include_directories("${Vulkan_INCLUDE_DIRS}")
 
 #VTK
-set(VTK_DIR "${CMAKE_SOURCE_DIR}/lib/VTK-9.5.2/lib/cmake/vtk-9.5")
+if (WIN32)
+    #需要将所有VTK DLL复制到可执行文件目录下
+    set(VTK_DIR "C:/VTK-9.5.0-MSVC/lib/cmake/vtk-9.5" CACHE STRING
+            "Absolute path of VTK")
+else ()
+    #Linux下无需复制DLL
+    set(VTK_DIR "~/Public/VTK-9.5.2/lib/cmake/vtk-9.5" CACHE STRING
+            "Absolute path of VTK")
+endif ()
 find_package(VTK REQUIRED)
 
 #OptiX着色器文件列表
@@ -70,6 +106,10 @@ foreach(SHADER_SOURCE ${OPTIX_SHADER_SOURCES})
     list(APPEND PTX_COMMAND -I "${OPTIX_ROOT}/include")
     list(APPEND PTX_COMMAND -std=c++${CMAKE_CXX_STANDARD})
     list(APPEND PTX_COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/${SHADER_SOURCE}")
+    if (DISABLE_COMPILE_ERROR)
+        #禁用着色器文件extern警告
+        #list(APPEND PTX_COMMAND -diag-suppress=20044)
+    endif ()
 
     #执行编译命令
     add_custom_command(
@@ -84,32 +124,12 @@ endforeach()
 add_custom_target(OPTIX_SHADERS ALL DEPENDS ${GENERATED_PTX_FILES})
 
 #添加构建目标
-add_executable(${EXECUTABLE_NAME}
-        src/Global/Main.cu
-        src/OGL/glad.c
-        include/Global/HostFunctions.cuh
-        src/Global/HostFunctions.cu
-        include/Global/DeviceFunctions.cuh
-        include/GraphicsAPI/SDL_D3D11Window.cuh
-        include/GraphicsAPI/SDL_D3D12Window.cuh
-        include/GraphicsAPI/SDL_GLWindow.cuh
-        include/GraphicsAPI/SDL_GraphicsWindow.cuh
-        include/GraphicsAPI/SDL_VKWindow.cuh
-        src/GraphicsAPI/SDL_D3D11Window.cu
-        src/GraphicsAPI/SDL_D3D12Window.cu
-        src/GraphicsAPI/SDL_GLWindow.cu
-        src/GraphicsAPI/SDL_GraphicsWindow.cu
-        src/GraphicsAPI/SDL_VKWindow.cu
-        include/Global/RendererImpl.cuh
-        src/Global/RendererImpl.cu
-        include/Global/Shader.cuh
-        include/Util/VTKReader.cuh
-        src/Util/VTKReader.cu
-        include/Util/ColorRamp.cuh
-        include/Global/Renderer.cuh
-        src/Global/Renderer.cu
-        include/Util/ProgramArgumentParser.cuh
+file(GLOB_RECURSE SRCS
+        "${CMAKE_SOURCE_DIR}/src/*.c"
+        "${CMAKE_SOURCE_DIR}/src/*.cpp"
+        "${CMAKE_SOURCE_DIR}/src/*.cu"
 )
+add_executable(${EXECUTABLE_NAME} ${SRCS})
 
 #确保在链接主程序之前，所有PTX文件都已生成
 add_dependencies(${EXECUTABLE_NAME} OPTIX_SHADERS)
@@ -118,7 +138,14 @@ add_dependencies(${EXECUTABLE_NAME} OPTIX_SHADERS)
 set_target_properties(${EXECUTABLE_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
 if (WIN32)
+    #为MSVC添加UTF-8编码支持
+    target_compile_options(${EXECUTABLE_NAME} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
     target_compile_options(${EXECUTABLE_NAME} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>)
+
+    if (DISABLE_COMPILE_ERROR)
+        #禁用D3D头文件编译警告
+        #add_compile_options(-diag-suppress=68,174,1394)
+    endif ()
 endif ()
 
 #D3D
@@ -127,7 +154,7 @@ if (WIN32)
 endif ()
 
 #SDL
-target_link_libraries(${EXECUTABLE_NAME} PUBLIC SDL2::SDL2 SDL2::SDL2main SDL2_ttf::SDL2_ttf)
+target_link_libraries(${EXECUTABLE_NAME} PUBLIC SDL2::SDL2 SDL2::SDL2main)
 
 #VK
 target_link_libraries(${EXECUTABLE_NAME} PUBLIC Vulkan::Vulkan)

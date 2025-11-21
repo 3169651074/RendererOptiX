@@ -97,12 +97,12 @@ namespace project {
         static RendererData commitRendererData(
                 GeometryData & addGeoData, MaterialData & addMatData,
                 const std::string & seriesFilePath, const std::string & seriesFileName,
-                const std::string & cacheFilePath, bool isDebugMode);
+                const std::string & cacheFilePath, bool isDebugMode, size_t maxCacheLoadThreadCount);
 
         //生成VTK粒子缓存文件并退出
         static void writeCacheFilesAndExit(
                 const std::string & seriesFilePath, const std::string & seriesFileName,
-                const std::string & cacheFilePath);
+                const std::string & cacheFilePath, size_t maxCacheLoadThreadCount);
 
         //设置额外实例更新函数，额外实例按照输入顺序排在整个实例列表pin_instances的头部，函数将在每帧被调用
         static void setAddGeoInsUpdateFunc(RendererData & data, UpdateAddInstancesFunc func);
