@@ -116,19 +116,22 @@ sudo apt install libsdl2-dev
 
 - 如果生成过CMake项目，在修改CMakeLists.txt后，需要删除生成的文件并重新配置。
 
+- Configure时，若报错找不到库，则修改库路径为正确的路径后，无需删除缓存，直接再次点击Configure即可。
+
 ### Windows
 
 - 生成.sln解决方案文件：
 
 1. 打开CMake GUI，设置源代码目录为项目根目录（包含CMakeLists.txt）
 2. 设置构建目录，可以在任意其他位置新建一个文件夹，或在项目根目录新建build文件夹
-3. 点击Configure，生成器选择`Visual Studio 17 2022`，其他设置保持不变
-4. 等待读取完成，设置所有依赖库的路径，注意SDL和VTK的路径需要分别指定到`install/cmake/`和`install/lib/cmake/vtk-x.x`
-5. 点击Generate生成CMake项目
-6. 点击Open Project在Visual Studio中打开项目，在“解决方案资源管理器”中找到“RendererOptiX”项目，右键“生成”，开始编译。
-7. 回到源代码目录bin/文件夹，将bin/Release文件夹下的可执行文件和两个库文件移动到bin目录下
-8. 确认SDL和VTK的动态库已经正确拷贝到bin目录下
-9. 开启`cache=true`，开始生成缓存文件并进行后续渲染
+3. 无需修改CMAKE_INSTALL_PREFIX，不会使用这个变量
+4. 点击Configure，生成器选择`Visual Studio 17 2022`，其他设置保持不变
+5. 等待读取完成，设置所有依赖库的路径，注意SDL和VTK的路径需要分别指定到`install/cmake/`和`install/lib/cmake/vtk-x.x`
+6. 点击Generate生成CMake项目
+7. 点击Open Project在Visual Studio中打开项目，在“解决方案资源管理器”中找到“RendererOptiX”项目，右键“生成”，开始编译。
+8. 回到源代码目录bin/文件夹，将bin/Release文件夹下的可执行文件和两个库文件移动到bin目录下
+9. 确认SDL和VTK的动态库已经正确拷贝到bin目录下
+10. 开启`cache=true`，开始生成缓存文件并进行后续渲染
 
 - 生成CMake配置文件，项目不依赖于Visual Studio .sln
 - 可以使用CLion IDE进行编译
@@ -136,10 +139,12 @@ sudo apt install libsdl2-dev
 ### Linux
 
 1. 打开CMake GUI，设置源代码目录为项目根目录（包含CMakeLists.txt）
-2. 点击Configure，生成器选择`Unix Makefiles`，其他设置保持不变
-3. 等待读取完成，设置所有依赖库的路径
-4. 点击Generate生成CMake项目
-5. 关闭GUI，在当前位置打开命令行，输入编译命令
+2. 设置构建目录，可以在任意其他位置新建一个文件夹，或在项目根目录新建build文件夹
+3. 无需修改CMAKE_INSTALL_PREFIX，不会使用这个变量
+4. 点击Configure，生成器选择`Unix Makefiles`，其他设置保持不变
+5. 等待读取完成，设置所有依赖库的路径
+6. 点击Generate生成CMake项目
+7. 关闭GUI，在当前位置打开命令行，输入编译命令
 
 ```bash
 cmake --build . --parallel
