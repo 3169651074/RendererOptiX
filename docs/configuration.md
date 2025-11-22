@@ -1,6 +1,6 @@
 # 配置参考
 
-本文档详细说明 `config.json` 配置文件的所有参数。
+本文档详细说明 `config.json` 配置文件的所有参数
 
 ## 配置文件位置
 
@@ -8,97 +8,37 @@
 
 可以在 `include/Util/ProgramArgumentParser.cuh` 中修改 `CONFIG_FILE_PATH` 常量来更改路径。
 
-## 配置结构
-
-```json
-{
-  "series-path": "...",
-  "series-name": "...",
-  "cache-path": "...",
-  "cache": false,
-  "debug-mode": false,
-  "cache-process-thread-count": 8,
-  "roughs": [...],
-  "metals": [...],
-  "spheres": [...],
-  "triangles": [...],
-  "loop-data": {...}
-}
-```
-
 ## 文件路径配置
 
-### series-path
-
-**类型**：`string`  
-**说明**：VTK 序列文件所在目录  
-**示例**：
 ```json
-"series-path": "../files/"
+//.vtk.series文件路径
+"series-path": "../files/",
+//.vtk.series文件名
+"series-name": "particle_mesh-short.vtk.series",
+//生成的缓存文件存放路径
+"cache-path": "../cache/",
 ```
+
 **注意**：
 - 可以是相对路径（相对于可执行文件）或绝对路径
 - 路径分隔符使用 `/`（Windows 和 Linux 都支持）
 
-### series-name
-
-**类型**：`string`  
-**说明**：VTK 序列文件名，包含 `.series` 后缀  
-**示例**：
-```json
-"series-name": "particle_mesh-short.vtk.series"
-```
-
-### cache-path
-
-**类型**：`string`  
-**说明**：缓存文件存放目录  
-**示例**：
-```json
-"cache-path": "../cache/"
-```
-
 ## 缓存配置
 
-### cache
-
-**类型**：`boolean`  
-**说明**：是否生成缓存文件并退出程序  
-**默认值**：`false`  
-**用法**：
-- `true`：程序启动后读取 VTK 文件，生成缓存文件，然后退出
-- `false`：正常渲染模式
-
-**示例**：
 ```json
+//是否生成缓存文件并退出程序
+//true：程序启动后读取VTK文件，生成缓存文件，然后退出
+//false：读取已生成的缓存文件并启动渲染
 "cache": false
-```
-
-### cache-process-thread-count
-
-**类型**：`integer`  
-**说明**：读写缓存文件时使用的 CPU 线程数  
-**默认值**：`8`  
-**推荐值**：4-8（根据 CPU 核心数调整）  
-**示例**：
-```json
+//读写缓存文件时使用的CPU线程数，根据实际CPU型号设定
 "cache-process-thread-count": 8
 ```
 
 ## 调试配置
 
-### debug-mode
-
-**类型**：`boolean`  
-**说明**：是否启用 OptiX 和图形 API 的调试模式  
-**默认值**：`false`  
-**注意**：
-- 启用后会显著降低性能
-- 仅用于调试和开发
-- 生产环境应设为 `false`
-
-**示例**：
 ```json
+//是否启用OptiX和图形API的调试模式
+//启用后会降低性能，仅在调试和开发中设置为true
 "debug-mode": false
 ```
 
@@ -485,26 +425,7 @@
 4. **测试不同 API**：尝试不同的图形 API 以找到最佳性能
 5. **相机参数调优**：根据场景大小调整相机参数
 
-## 常见配置错误
-
-### 错误 1：路径不存在
-
-确保 `series-path` 和 `cache-path` 目录存在。
-
-### 错误 2：材质索引越界
-
-确保 `mat-index` 在对应材质数组的有效范围内。
-
-### 错误 3：Linux 使用 D3D
-
-Linux 不支持 Direct3D，使用 `"OGL"` 或 `"VK"`。
-
-### 错误 4：数组格式错误
-
-确保数组格式正确，例如 `[0.0, 0.0, 0.0]` 而不是 `[0.0,0.0,0.0]`（虽然两者都有效，但建议使用空格）。
-
-## 参考
+## 下一步
 
 - [使用指南](usage.md) - 使用示例
 - [技术细节](technical-details.md) - 实现原理
-

@@ -1,15 +1,23 @@
 # 使用指南
 
-## 快速开始
-
-### 1. 准备 VTK 数据
+## 1. 准备 VTK 数据
 
 渲染器需要以下输入数据：
 - 一个.vtk.series序列文件
 - 一组.vtk文件，或一组.cache缓存文件
 - config.json配置文件
 
-### 2. 配置项目
+### VTK文件格式
+
+VTK文件格式需要匹配src/Util/VTKReaderImpl.cpp中的文件读取方式。若已有VTK文件格式和以下格式不同，则应修改VTKReaderImpl.cpp以匹配当前文件格式
+
+每个VTK文件需要包括：
+- 一个包含一组Cell的vtkPolyData，全部Cell类型为 vtkTriangleStrip
+- vtkDataArray1：id  --整数数组
+- vtkDataArray2：vel --每个元素包含三个浮点数的速度数组
+- 每个Cell需要包含一组顶点坐标，并能被vtkPolyDataNormals用于计算顶点法线
+
+## 2. 配置项目
 
 编辑 `files/config.json` 文件，设置以下关键参数：
 
@@ -21,158 +29,17 @@
 }
 ```
 
-### 3. 运行程序
+## 3. 运行程序
 
-#### Windows
-```powershell
-cd bin
-.\RendererOptiX.exe
-```
+1. 将config.json中的cache属性设置为true，生成缓存文件
+2. 将cache改为false，再次运行程序，开始循环渲染粒子动画
+3. 每一帧，所有粒子的位置根据当前加载的VTK文件和粒子的速度确定，渲染器会使用速度和帧数量计算帧位移
 
-#### Linux
-```bash
-cd bin
-./RendererOptiX
-```
+## 4. 交互控制
 
-## 配置文件说明
+- **ESC**：退出程序
 
-### 基本配置
-
-#### 文件路径配置
-
-- `series-path`：VTK 序列文件所在目录（相对或绝对路径）
-- `series-name`：序列文件名（包含 `.series` 后缀）
-- `cache-path`：缓存文件存放目录
-
-#### 缓存配置
-
-- `cache`：`true` 表示生成缓存文件后退出，`false` 表示正常渲染
-- `cache-process-thread-count`：读写缓存时使用的 CPU 线程数（推荐 4-8，根据实际CPU型号和系统内存大小进行设置，越高的并发线程数，对系统内存的要求越高。每个线程约需要1G内存）
-
-#### 调试模式
-
-- `debug-mode`：`true` 启用 OptiX 和图形 API 的调试模式（性能较低）
-
-### 材质配置
-
-#### 粗糙材质 (Rough)
-
-```json
-"roughs": [
-  {"albedo": [0.65, 0.05, 0.05]},
-  {"albedo": [0.73, 0.73, 0.73]},
-  {"albedo": [0.12, 0.45, 0.15]},
-  {"albedo": [0.70, 0.60, 0.50]}
-]
-```
-
-- `albedo`：反照率颜色（RGB，范围 0.0-1.0）
-
-#### 金属材质 (Metal)
-
-```json
-"metals": [
-  {"albedo": [0.8, 0.85, 0.88], "fuzz": 0.0}  // 镜面金属
-]
-```
-
-- `albedo`：金属颜色（RGB，范围 0.0-1.0）
-- `fuzz`：表面粗糙度（范围 0.0-1.0，0.0 为完全镜面，值越大越粗糙）
-
-### 几何体配置
-
-#### 球体 (Spheres)
-
-```json
-"spheres": [
-  {
-    "center": [0.0, 0.0, 0.0],
-    "radius": 1000.0,
-    "mat-type": "ROUGH",
-    "mat-index": 3,
-    "shift": [0.0, 0.0, -1000.5],
-    "rotate": [0.0, 0.0, 0.0],
-    "scale": [1.0, 1.0, 1.0]
-  }
-]
-```
-
-- `center`：球心位置
-- `radius`：球体半径
-- `mat-type`：材质类型（`"ROUGH"` 或 `"METAL"`）
-- `mat-index`：材质索引（对应 `roughs` 或 `metals` 数组索引）
-- `shift`：位移向量
-- `rotate`：旋转角度（度）
-- `scale`：缩放因子
-
-#### 三角形 (Triangles)
-
-```json
-"triangles": [
-  {
-    "vertices": [[x1, y1, z1], [x2, y2, z2], [x3, y3, z3]],
-    "normals": [[nx1, ny1, nz1], [nx2, ny2, nz2], [nx3, ny3, nz3]],
-    "mat-type": "ROUGH",
-    "mat-index": 0
-  }
-]
-```
-
-### 渲染循环配置
-
-```json
-"loop-data": {
-  "api": "VK",
-  "window-width": 1200,
-  "window-height": 800,
-  "fps": 60,
-  "camera-center": [5.0, 0.0, 0.0],
-  "camera-target": [0.0, 0.0, 0.0],
-  "up-direction": [0.0, 0.0, 1.0],
-  "camera-pitch-limit-degree": 85.0,
-  "camera-speed-stride": 0.002,
-  "camera-initial-speed-ratio": 10,
-  "mouse-sensitivity": 0.002,
-  "render-speed-ratio": 4,
-  "particle-shift": [0.0, 0.0, 0.0],
-  "particle-scale": [1.0, 1.0, 1.0]
-}
-```
-
-#### 图形 API 选择
-
-- `api`：图形 API 类型
-  - `"OGL"`：OpenGL
-  - `"VK"`：Vulkan
-  - `"D3D11"`：Direct3D 11（仅 Windows）
-  - `"D3D12"`：Direct3D 12（仅 Windows）
-
-#### 窗口设置
-
-- `window-width`：窗口宽度（像素）
-- `window-height`：窗口高度（像素）
-- `fps`：目标帧率
-
-#### 相机设置
-
-- `camera-center`：初始相机位置
-- `camera-target`：初始相机目标点
-- `up-direction`：相机上方向量（无需单位化）
-- `camera-pitch-limit-degree`：俯仰角限制（度，应小于 90）
-- `camera-speed-stride`：滚轮调节速度的变化量
-- `camera-initial-speed-ratio`：初始速度相对于 `camera-speed-stride` 的倍数
-- `mouse-sensitivity`：鼠标灵敏度
-
-#### 粒子设置
-
-- `render-speed-ratio`：粒子运动速度倍率（越大越慢，1 为原速）
-- `particle-shift`：所有粒子的整体位移
-- `particle-scale`：所有粒子的整体缩放
-
-## 交互控制
-
-### 键盘控制
+### 键盘控制相机中心位置
 
 - **W**：向前移动
 - **S**：向后移动
@@ -180,94 +47,27 @@ cd bin
 - **D**：向右移动
 - **Space**：向上移动
 - **Left Shift**：向下移动
-- **Tab**：按下时禁用降噪
-- **ESC**：退出程序
 
-### 鼠标控制
+### 鼠标控制相机朝向
 
 - **鼠标移动**：旋转相机视角
-- **鼠标滚轮**：调节相机移动速度。向上滚动提升速度
+- **鼠标滚轮**：调节相机移动速度。向上滚动提升速度，向下滚动降低速度
 
-## 使用示例
+### 额外功能
 
-### 示例 1：基本渲染
+- 渲染器集成了OptiX降噪器，默认开启降噪，可以按住Tab键以临时禁用降噪，查看光线追踪的原始渲染结果
 
-1. 准备 VTK 数据文件
-2. 编辑 `config.json`，设置正确的文件路径
-3. 运行程序
+## 5. 注意事项
 
-```json
-{
-  "series-path": "../files/",
-  "series-name": "particle_mesh.vtk.series",
-  "cache-path": "../cache/",
-  "cache": false,
-  "debug-mode": false,
-  "loop-data": {
-    "api": "VK",
-    "window-width": 1920,
-    "window-height": 1080,
-    "fps": 60
-  }
-}
-```
-
-### 示例 2：生成缓存
-
-如果首次加载 VTK 数据较慢，可以先生成缓存：
-
-1. 设置 `"cache": true`
-2. 运行程序，程序会在生成缓存后自动退出
-3. 将 `"cache": false` 改回，正常渲染
-
-#### 什么时候需要重新生成缓存
+### 什么时候需要重新生成缓存
 1. series文件引用的任何一个VTK文件被修改
-2. 更换运行平台，如从Windows换到Linux
-3. 因缓存文件损坏导致渲染错误
+2. 操作系统使用不同的二进制内存布局，如小端序 -- 大端序
+3. 缓存文件损坏
 
-重新生成缓存时，只需要将cache参数改为true并运行程序即可，原有缓存文件会被自动删除。
+- 重新生成缓存时，只需要将cache参数改为true并运行程序即可，原有缓存文件会被自动删除
+- 虽然从缓存文件中读取无需使用到VTK库，但是可执行文件已经链接了VTK动态库，缺少VTK动态库文件将导致程序无法运行
 
-### 示例 3：添加环境球体
-
-添加一个大的环境球体作为背景：
-
-```json
-"spheres": [
-  {
-    "center": [0.0, 0.0, 0.0],
-    "radius": 1000.0,
-    "mat-type": "ROUGH",
-    "mat-index": 3,
-    "shift": [0.0, 0.0, -1000.5],
-    "rotate": [0.0, 0.0, 0.0],
-    "scale": [1.0, 1.0, 1.0]
-  }
-]
-```
-
-### 示例 4：多材质场景
-
-```json
-"roughs": [
-  {"albedo": [0.8, 0.1, 0.1]},  // 红色
-  {"albedo": [0.1, 0.8, 0.1]},  // 绿色
-  {"albedo": [0.1, 0.1, 0.8]}   // 蓝色
-],
-"metals": [
-  {"albedo": [0.9, 0.9, 0.9], "fuzz": 0.0},  // 镜面
-  {"albedo": [0.7, 0.6, 0.5], "fuzz": 0.3}   // 粗糙金属
-]
-```
-
-## 性能建议
-
-1. **使用缓存**：首次加载后生成缓存文件，后续加载会更快
-2. **调整线程数**：根据 CPU 核心数设置 `cache-process-thread-count`
-3. **选择合适的 API**：Vulkan 通常性能最好，OpenGL 兼容性最好
-4. **降低分辨率**：如果帧率不足，可以降低窗口分辨率
-5. **关闭调试模式**：生产环境确保 `debug-mode` 为 `false`
-
-## 高级用法
+## 6. 高级用法
 
 ### 自定义实例更新
 
@@ -277,13 +77,43 @@ cd bin
 static void updateInstancesTransforms(
     OptixInstance * pin_instances, size_t instanceCount, unsigned long long frameCount)
 {
-    // 根据 frameCount 更新变换矩阵
-    // 例如：旋转动画
-    float angle = frameCount * 0.01f;
-    // ... 计算变换矩阵并更新 pin_instances
-    // 只需要将新的变换矩阵拷贝到pin_instances[i].transform即可
-    // 此函数中只修改额外几何体的实例变换矩阵，所有额外几何体实例按照 球体 -> 三角形 的顺序从实例数组收个元素开始向后存放，instanceCount为当前文件包含所有粒子实例的实例总数
-    // frameCount为当前帧数
+/*
+  pin_instances：当前帧的实例数组，在页面锁定内存中
+  instanceCount：实例总数，包括自定义添加的额外实例和当前VTK文件的所有粒子，每个粒子一个实例
+  frameCount：当前帧计数，可以使用此参数构造动画
+*/
+
+    //示例：球体整体绕中心位置转动
+    static const Point3 initialCenter = {0.0, 2.0, 0.0};
+    const float radius = 2.0f;
+    const float speed = 0.02f;
+    const float angle = static_cast<float>(frameCount) * speed;
+    const float3 newCenter = {
+            initialCenter[0] + radius * std::cos(angle) * 1.5f,
+            initialCenter[1] + radius * std::sin(angle) * std::cos(angle),
+            initialCenter[2] + radius * std::sin(angle) * 1.5f
+    };
+    const float3 newCenter2 = {-newCenter.x, newCenter.y,-newCenter.z};
+    const float3 newCenter3 = {-newCenter.x, newCenter.y + 5.0f, newCenter.z};
+
+    //计算变换矩阵并更新 pin_instances[i].transform
+    float transform[12];
+    MathHelper::constructTransformMatrix(
+        newCenter,          //位移
+        {0.0f, 0.0f, 0.0f}, //旋转
+        {1.0f, 1.0f, 1.0f}, //缩放
+        transform
+    );
+
+    //若此动画应用于第一个自定义实例
+    memcpy(pin_instances[0].transform, transform, 12 * sizeof(float));
+
+/*
+注意：
+  此函数中应只修改额外几何体的实例变换矩阵，所有额外几何体实例按照
+ 【球体 -> 三角形】的顺序从实例数组收个元素开始向后存放，instanceCount为当前文件包含所有粒子实例的实例总数，应当记录自定义实例个数，且不应该在此函数内修改VTK粒子实例的变换矩阵，自定义实例排列在所有VTK粒子实例之前，即实例数组的头部
+*/
 }
 ```
-修改完成后，需要重新编译项目，无需重新生成缓存文件
+
+- 修改完成后，需要重新编译项目，但无需重新生成缓存文件

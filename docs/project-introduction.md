@@ -7,9 +7,9 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 ## 项目目标
 
 - **高性能渲染**：利用 GPU 光线追踪技术实现实时渲染
-- **易用性**：通过 JSON 配置文件简化渲染参数设置
+- **易用性**：通过 JSON 配置文件统一渲染参数设置
 - **跨平台支持**：支持 Windows 和 Linux 平台
-- **多 API 兼容**：支持 OpenGL、Vulkan、Direct3D11、Direct3D12
+- **多 API 兼容**：支持使用 OpenGL、Vulkan、Direct3D11、Direct3D12 显示渲染画面
 - **可扩展性**：模块化设计，便于扩展新功能
 
 ## 核心特性
@@ -42,7 +42,7 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 - 鼠标控制相机旋转
 - 键盘控制相机移动（WASD移动 + Space/Left Shift上升下降）
 - 滚轮调节移动速度（向上滚动加速移动）
-- 单击鼠标左键释放鼠标自由移动，再次单击
+- 单击鼠标左键释放鼠标自由移动，再次单击可回到窗口中
 - 可配置的相机参数
 
 ## 架构设计
@@ -153,7 +153,7 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 
 - **CUDA**：GPU 计算和内存管理
 - **OptiX 9.0**：光线追踪引擎
-- **VTK 9.5.2**：VTK 文件读取
+- **VTK 9.5**：VTK 文件读取
 - **SDL2**：窗口和输入管理
 - **Vulkan/DirectX/OpenGL**：图形渲染后端
 - **nlohmann/json**：JSON 配置解析
