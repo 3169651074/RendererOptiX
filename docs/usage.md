@@ -3,6 +3,7 @@
 ## 1. 准备 VTK 数据
 
 渲染器需要以下输入数据：
+
 - 一个.vtk.series序列文件
 - 一组.vtk文件，或一组.cache缓存文件
 - config.json配置文件
@@ -12,6 +13,7 @@
 VTK文件格式需要匹配src/Util/VTKReaderImpl.cpp中的文件读取方式。若已有VTK文件格式和以下格式不同，则应修改VTKReaderImpl.cpp以匹配当前文件格式
 
 每个VTK文件需要包括：
+
 - 一个包含一组Cell的vtkPolyData，全部Cell类型为 vtkTriangleStrip
 - vtkDataArray1：id  --整数数组
 - vtkDataArray2：vel --每个元素包含三个浮点数的速度数组
@@ -59,7 +61,8 @@ VTK文件格式需要匹配src/Util/VTKReaderImpl.cpp中的文件读取方式。
 
 ## 5. 注意事项
 
-### 什么时候需要重新生成缓存
+- 什么时候需要重新生成缓存
+
 1. series文件引用的任何一个VTK文件被修改
 2. 操作系统使用不同的二进制内存布局，如小端序 -- 大端序
 3. 缓存文件损坏

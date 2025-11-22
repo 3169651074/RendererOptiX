@@ -3,22 +3,51 @@ set(EXECUTABLE_NAME "RendererOptiX")
 
 #CUDA
 if (WIN32)
-    set(CMAKE_CUDA_COMPILER
-            "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0/bin/nvcc.exe" CACHE PATH
-            "Absolute path of cuda compiler (nvcc)")
-    set(CUDA_INCLUDE_DIR
-            "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0/include" CACHE PATH
-            "Absolute path of cuda include directory")
+    set(CMAKE_CUDA_COMPILER_DEFAULT "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0/bin/nvcc.exe")
+    set(CUDA_INCLUDE_DIR_DEFAULT "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0/include")
 else ()
-    set(CMAKE_CUDA_COMPILER
-            "/usr/local/cuda/bin/nvcc" CACHE PATH
-            "Absolute path of cuda compiler (nvcc)")
-    set(CUDA_INCLUDE_DIR
-            "/usr/local/cuda/include" CACHE PATH
-            "Absolute path of cuda include directory")
+    set(CMAKE_CUDA_COMPILER_DEFAULT "/usr/local/cuda/bin/nvcc")
+    set(CUDA_INCLUDE_DIR_DEFAULT "/usr/local/cuda/include")
 endif ()
+
+#OptiX
+if (WIN32)
+    set(OPTIX_ROOT_DEFAULT "C:/ProgramData/NVIDIA Corporation/OptiX SDK 9.0.0")
+else ()
+    set(OPTIX_ROOT_DEFAULT "~/Public/NVIDIA-OptiX-SDK-9.0.0-linux64-x86_64")
+endif ()
+
+#SDL
+if (WIN32)
+    #set(CONFIG_SDL2_DIR_DEFAULT "C:/SDL2/lib/cmake")
+    set(CONFIG_SDL2_DIR_DEFAULT "C:/Users/Lenovo/Desktop/RendererOptiX-main/SDL/install/cmake")
+else ()
+    #若手动编译SDL库，则在此处设置路径，否则无需更改
+    set(CONFIG_SDL2_DIR_DEFAULT "")
+endif ()
+
+#VK
+if (WIN32)
+    set(CONFIG_VULKAN_DIR_DEFAULT "C:/VulkanSDK/1.4.321.1")
+else ()
+    set(CONFIG_VULKAN_DIR_DEFAULT "~/Public/vulkan-1.4.321.1/x86_64")
+endif ()
+
+#VTK
+if (WIN32)
+    #set(CONFIG_VTK_DIR_DEFAULT "C:/VTK-9.5.2/lib/cmake/vtk-9.5")
+    set(CONFIG_VTK_DIR_DEFAULT "C:/Users/Lenovo/Desktop/RendererOptiX-main/VTK/install/lib/cmake/vtk-9.5")
+else ()
+    set(CONFIG_VTK_DIR_DEFAULT "~/Public/VTK-9.5.2/lib/cmake/vtk-9.5")
+endif ()
+
+#=======================================================================================
+
+#CUDA
+set(CMAKE_CUDA_COMPILER ${CMAKE_CUDA_COMPILER_DEFAULT} CACHE PATH "Absolute path of cuda compiler (nvcc)")
+set(CUDA_INCLUDE_DIR ${CUDA_INCLUDE_DIR_DEFAULT} CACHE PATH "Absolute path of cuda include directory")
 include_directories(${CUDA_INCLUDE_DIR})
-message(STATUS "NVCC Path: " ${CONFIG_CMAKE_CUDA_COMPILER})
+message(STATUS "NVCC Path: " ${CMAKE_CUDA_COMPILER})
 
 #自动检测GPU的计算能力标准
 set(CMAKE_CUDA_ARCHITECTURES native)
@@ -34,40 +63,30 @@ include_directories("${CMAKE_SOURCE_DIR}/include")
 set(EXECUTABLE_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin")
 
 #OptiX
-if (WIN32)
-    set(OPTIX_ROOT "C:/ProgramData/NVIDIA Corporation/OptiX SDK 9.0.0" CACHE PATH
-            "Absolute path of OptiX SDK")
-else ()
-    set(OPTIX_ROOT "~/Public/NVIDIA-OptiX-SDK-9.0.0-linux64-x86_64" CACHE PATH
-            "Absolute path of OptiX SDK")
-endif ()
+set(OPTIX_ROOT ${OPTIX_ROOT_DEFAULT} CACHE PATH "Absolute path of OptiX SDK")
 message(STATUS "OptiX Root Directory: " ${OPTIX_ROOT})
 include_directories("${OPTIX_ROOT}/include")
 
 #SDL
 if (WIN32)
-    #需要将SDL2.dll复制到可执行文件目录下
-    set(SDL2_DIR "C:/SDL-2.32.10-MSVC/cmake")
+    set(CONFIG_SDL2_DIR ${CONFIG_SDL2_DIR_DEFAULT} CACHE PATH "Absolute path of SDL")
 else ()
     #Linux使用系统包管理器安装libsdl2-dev
     #仍然提供一个可选的根目录设置，以防用户手动编译
-    set(CONFIG_SDL_DIR "" CACHE PATH
-            "Absolute path to the root directory of the SDL2 library (not needed if using system package)")
+    #set(CONFIG_SDL2_DIR "" CACHE PATH
+    #        "Absolute path to the root directory of the SDL2 library (not needed if using system package)")
 
-    #如果用户提供了路径，则使用它来辅助 find_package
-    if (CONFIG_SDL_DIR)
-        set(SDL2_DIR "${CONFIG_SDL_DIR}/lib/cmake/SDL2")
+    #如果用户提供了路径，则使用它来辅助find_package
+    if (CONFIG_SDL2_DIR_DEFAULT)
+        set(CONFIG_SDL2_DIR "${CONFIG_SDL2_DIR_DEFAULT}")
     endif()
 endif ()
+set(SDL2_DIR ${CONFIG_SDL2_DIR})
 find_package(SDL2 REQUIRED)
 
 #VK
-if (WIN32)
-    set(CONFIG_VULKAN_SDK_PATH "C:/VulkanSDK/1.4.328.1" CACHE PATH
-            "Absolute path of vulkan SDK")
-else ()
-    set(CONFIG_VULKAN_SDK_PATH "~/Public/vulkan-1.4.328.1/x86_64" CACHE PATH
-            "Absolute path of vulkan SDK")
+set(CONFIG_VULKAN_SDK_PATH ${CONFIG_VULKAN_DIR_DEFAULT} CACHE PATH "Absolute path of vulkan SDK")
+if (UNIX)
     #需要额外设置运行时环境变量
     set(ENV{VULKAN_SDK} ${CONFIG_VULKAN_SDK_PATH})
     set(ENV{VK_LAYER_PATH} "${CONFIG_VULKAN_SDK_PATH}/etc/vulkan/explicit_layer.d")
@@ -76,15 +95,8 @@ find_package(Vulkan REQUIRED)
 include_directories("${Vulkan_INCLUDE_DIRS}")
 
 #VTK
-if (WIN32)
-    #需要将所有VTK DLL复制到可执行文件目录下
-    set(VTK_DIR "C:/VTK-9.5.0-MSVC/lib/cmake/vtk-9.5" CACHE PATH
-            "Absolute path of VTK")
-else ()
-    #Linux下无需复制DLL
-    set(VTK_DIR "~/Public/VTK-9.5.2/lib/cmake/vtk-9.5" CACHE PATH
-            "Absolute path of VTK")
-endif ()
+set(CONFIG_VTK_DIR ${CONFIG_VTK_DIR_DEFAULT} CACHE PATH "Absolute path of VTK")
+set(VTK_DIR ${CONFIG_VTK_DIR})
 find_package(VTK REQUIRED)
 
 #OptiX着色器文件列表

@@ -17,6 +17,7 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 ### 1. OptiX 光线追踪
 
 项目使用 NVIDIA OptiX 9.0 作为核心渲染引擎，实现了：
+
 - 实时光线追踪
 - 多种几何体支持（球体、三角形、VTK 粒子）
 - 材质系统（粗糙材质和金属材质）
@@ -32,6 +33,7 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 ### 3. 图形 API
 
 项目实现了现代图形 API 和CUDA的互操作，支持：
+
 - **OpenGL**：跨平台标准图形 API
 - **Vulkan**：现代低级别图形 API
 - **Direct3D11**：Windows 平台（仅 Windows）
@@ -49,7 +51,7 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 
 ### 整体架构
 
-```
+```text
 ┌─────────────────────────────────────────┐
          应用程序入口 (Main.cu)
 └──────────────┬──────────────────────────┘
@@ -89,6 +91,7 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 #### 1. 渲染器核心 (Renderer)
 
 `Renderer` 类提供了渲染器的主要接口：
+
 - `commitRendererData()`：提交几何体和材质数据，初始化渲染器
 - `startRender()`：启动渲染循环
 - `freeRendererData()`：释放渲染资源
@@ -96,6 +99,7 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 #### 2. OptiX 实现 (RendererImpl)
 
 实现了 OptiX 相关的底层操作：
+
 - **上下文管理**：创建和销毁 OptiX 设备上下文
 - **加速结构**：构建几何加速结构（GAS）和实例加速结构（IAS）
 - **着色器模块**：加载和编译 PTX 着色器
@@ -105,6 +109,7 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 #### 3. 图形 API 封装
 
 `SDL_GraphicsWindow` 提供了统一的图形 API 接口：
+
 - 窗口创建和管理
 - 图形资源（纹理、缓冲区）管理
 - CUDA 与图形 API 的互操作
@@ -113,6 +118,7 @@ RendererOptiX 是一个基于 NVIDIA OptiX 9.0 实现的高性能实时渲染器
 #### 4. VTK 读取器 (VTKReader)
 
 负责读取和处理 VTK 数据：
+
 - 解析 VTK 序列文件
 - 读取粒子几何数据
 - 缓存管理（读写缓存文件）
