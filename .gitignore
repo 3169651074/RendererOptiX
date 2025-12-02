@@ -3,3 +3,7 @@
 .vs/
 .vscode/
 shader/Shader.ptx
+files/particle_mesh/
+files/particle_mesh.vtk.series
+files/wall_mesh/
+files/wall_mesh.vtk.series

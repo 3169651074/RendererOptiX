@@ -3,6 +3,7 @@
 
 #include <Global/HostFunctions.cuh>
 #include <Global/Shader.cuh>
+#include <GraphicsAPI/SDL_GraphicsWindow.cuh>
 
 namespace project {
     //着色器绑定表数据类型
@@ -19,6 +20,40 @@ namespace project {
     //加速结构数据类型
     typedef std::pair<OptixTraversableHandle, CUdeviceptr> GAS;
     typedef std::tuple<OptixTraversableHandle, CUdeviceptr, OptixAccelBufferSizes> IAS;
+
+    //实例更新函数类型
+    typedef void (*UpdateAddInstancesFunc)(
+            OptixInstance * pin_instancesThisFile, size_t instanceCount, unsigned long long frameCount);
+
+    //以下定义的类型为输入原始类型，需要转换为渲染器类型
+    //几何体
+    typedef struct Sphere {
+        float3 center;
+        float radius;
+    } Sphere;
+    typedef struct Triangle {
+        std::array<float3, 3> vertices;
+        std::array<float3, 3> normals;
+    } Triangle;
+
+    //材质
+    typedef struct MaterialIndex {
+        MaterialType materialType;
+        size_t materialIndex;
+    } MaterialIndex;
+
+    //二维输入数组中，每个一维数组的所有几何体将会被视为一个实例
+    typedef struct GeometryData {
+        std::vector<std::vector<Sphere>> spheres;
+        std::vector<MaterialIndex> sphereMaterialIndices;   //一个实例使用一个材质
+
+        std::vector<std::vector<Triangle>> triangles;
+        std::vector<MaterialIndex> triangleMaterialIndices;
+    } GeometryData;
+    typedef struct MaterialData {
+        std::vector<float3> roughs;
+        std::vector<std::pair<float3, float>> metals;
+    } MaterialData;
 
     //以下定义的类型由输入类型转换，作为渲染参数传递
     //一个RenderSphere表示一个或一组球体，将会被视为一个实例：构建到同一个GAS，对应一个SBT记录
@@ -43,7 +78,7 @@ namespace project {
     } RendererTriangle;
 
     //一个VTK粒子，包含多个三角形
-    typedef struct RendererParticle {
+    typedef struct RendererMeshParticle {
         size_t id;
         float3 velocity;
 
@@ -52,7 +87,16 @@ namespace project {
         float3 * dev_vertices;
         float3 * dev_normals;
         size_t count;
-    } RendererParticle;
+    } RendererMeshParticle;
+
+    //一个VTK文件信息，仅包含粒子的非几何信息
+    typedef struct RendererTimeParticle {
+        float3 position;    //粒子中心位置
+        size_t id;
+        float4 quat;        //旋转四元数
+        float3 velocity;    //速度
+        size_t shapeID;     //几何类型索引
+    } RendererTimeParticle;
 
     //所有材质。VTK粒子材质偏移量为额外Rough材质数量
     typedef struct RendererMaterial {
@@ -73,6 +117,31 @@ namespace project {
         size_t instanceCount;
     } RendererAS;
 
+    //窗口参数，需要通过构造方法创建
+    typedef struct RenderLoopData {
+        SDL_GraphicsWindowAPIType apiType;
+        int windowWidth, windowHeight;
+        const char * windowTitle;
+
+        size_t targetFPS;
+        float3 cameraCenter, cameraTarget, upDirection;
+
+        size_t renderSpeedRatio;
+        float3 particleOffset, particleScale;
+        float mouseSensitivity, pitchLimitDegree;
+        float cameraMoveSpeedStride;
+        size_t initialSpeedNTimesStride;
+        bool isGraphicsAPIDebugMode;
+
+        RenderLoopData(
+                SDL_GraphicsWindowAPIType apiType, int windowWidth, int windowHeight, const char * windowTitle,
+                size_t targetFPS, const float3 & cameraCenter, const float3 & cameraTarget, const float3 & upDirection,
+                size_t renderSpeedRatio, const float3 & particleOffset = {}, const float3 & particleScale = {1.0f, 1.0f, 1.0f},
+                float mouseSensitivity = 0.002f, float pitchLimitDegree = 85.0f,
+                float cameraMoveSpeedStride = 0.002f, size_t initialSpeedNTimesStride = 10,
+                bool isGraphicsAPIDebugMode = false);
+    } RenderLoopData;
+
     //初始化optix上下文
     OptixDeviceContext createContext(const std::string & cacheFilePath, bool isDebugMode);
     void destroyContext(OptixDeviceContext & context);
@@ -83,7 +152,7 @@ namespace project {
     GAS buildGASForTriangles(
             OptixDeviceContext & context, const RendererTriangle & triangles, cudaStream_t stream = nullptr);
     GAS buildGASForParticle(
-            OptixDeviceContext & context, const RendererParticle & particle, cudaStream_t stream = nullptr);
+            OptixDeviceContext & context, const RendererMeshParticle & particle, cudaStream_t stream = nullptr);
 
     //构建IAS
     IAS buildIAS(
@@ -136,7 +205,7 @@ namespace project {
     //创建一个文件所有VTK粒子的记录，每个RendererParticle一个记录
     std::vector<HitGroupSbtRecord> createVTKParticleSBTRecord(
             OptixProgramGroup & triangleRoughProgramGroup, OptixProgramGroup & triangleMetalProgramGroup,
-            const std::vector<RendererParticle> & particles,
+            const std::vector<RendererMeshParticle> & particles,
             const RendererMaterial & globalMaterials, size_t materialOffset);
 
     //释放一组SBT记录的设备内存

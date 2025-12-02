@@ -10,6 +10,7 @@ static void updateInstancesTransforms(
 
 #undef main
 int main(int argc, char * argv[]) {
+#ifdef MESH
     //解析JSON参数
     auto [geoData, matData, loopData, transforms,
           seriesFilePath, seriesFileName, cacheFilePath,
@@ -17,21 +18,25 @@ int main(int argc, char * argv[]) {
           cacheProcessThreadCount] = ProgramArgumentParser::parseProgramArguments();
     const size_t maxCacheLoadThreadCount = std::max<size_t>(1, cacheProcessThreadCount);
     if (isWriteCache) {
-        Renderer::writeCacheFilesAndExit(seriesFilePath, seriesFileName, cacheFilePath, maxCacheLoadThreadCount);
+        RendererMesh::writeCacheFilesAndExit(seriesFilePath, seriesFileName, cacheFilePath, maxCacheLoadThreadCount);
     }
     instanceTransforms = transforms;
 
     //提交几何体，粒子文件信息和材质数据
-    auto data = Renderer::commitRendererData(
+    auto data = RendererMesh::commitRendererData(
             geoData, matData,
             seriesFilePath, seriesFileName, cacheFilePath,
             isDebugMode, maxCacheLoadThreadCount);
-    Renderer::setAddGeoInsUpdateFunc(data, &updateInstancesTransforms);
+    RendererMesh::setAddGeoInsUpdateFunc(data, &updateInstancesTransforms);
 
     //启动交互
-    Renderer::startRender(data, loopData);
+    RendererMesh::startRender(data, loopData);
 
     //清理资源
-    Renderer::freeRendererData(data);
+    RendererMesh::freeRendererData(data);
     return 0;
+#elifdef TIME
+#else
+
+#endif
 }

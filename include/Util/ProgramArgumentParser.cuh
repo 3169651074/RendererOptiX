@@ -1,7 +1,7 @@
 #ifndef RENDEREROPTIX_PROGRAMARGUMENTPARSER_CUH
 #define RENDEREROPTIX_PROGRAMARGUMENTPARSER_CUH
 
-#include <Global/Renderer.cuh>
+#include <Global/RendererMesh.cuh>
 #include <JSON/json.hpp>
 using json = nlohmann::json;
 
@@ -42,7 +42,7 @@ namespace project {
 
         //解析config.json
         static std::tuple<
-                GeometryData, MaterialData, Renderer::RenderLoopData,
+                GeometryData, MaterialData, RenderLoopData,
                 std::vector<std::array<float, 12>>,
                 std::string, std::string, std::string, bool, bool, size_t
         > parseProgramArguments();

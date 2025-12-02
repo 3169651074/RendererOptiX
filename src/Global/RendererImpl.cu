@@ -138,7 +138,7 @@ namespace project {
         return buildASImpl(context, buildOptions, buildInput, true, stream);
     }
     GAS buildGASForParticle(
-            OptixDeviceContext & context, const RendererParticle & particle, cudaStream_t stream)
+            OptixDeviceContext & context, const RendererMeshParticle & particle, cudaStream_t stream)
     {
         const OptixAccelBuildOptions buildOptions = {
                 .buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE,
@@ -542,7 +542,7 @@ namespace project {
 
     std::vector<HitGroupSbtRecord> createVTKParticleSBTRecord(
             OptixProgramGroup & triangleRoughProgramGroup, OptixProgramGroup & triangleMetalProgramGroup,
-            const std::vector<RendererParticle> & particles,
+            const std::vector<RendererMeshParticle> & particles,
             const RendererMaterial & globalMaterials, size_t materialOffset)
     {
         std::vector<HitGroupSbtRecord> records;
@@ -727,9 +727,20 @@ namespace project {
 
         cudaCheckError(cudaFree(reinterpret_cast<void *>(args.denoiserOutputBuffer)));
         cudaCheckError(cudaFree(reinterpret_cast<void *>(args.denoiserDisplayBuffer)));
-        for (size_t i = 0; i < 3; i++) {
-            cudaCheckError(cudaFree(reinterpret_cast<void *>(args.denoiserInputBuffers[i])));
+        for (auto denoiserInputBuffer : args.denoiserInputBuffers) {
+            cudaCheckError(cudaFree(reinterpret_cast<void *>(denoiserInputBuffer)));
         }
         args = {};
     }
+
+    RenderLoopData::RenderLoopData(
+            SDL_GraphicsWindowAPIType apiType, int windowWidth, int windowHeight, const char * windowTitle,
+            size_t targetFPS, const float3 & cameraCenter, const float3 & cameraTarget, const float3 & upDirection,
+            size_t renderSpeedRatio, const float3 & particleOffset, const float3 & particleScale,
+            float mouseSensitivity, float pitchLimitDegree, float cameraMoveSpeedStride, size_t initialSpeedNTimesStride, bool isGraphicsAPIDebugMode)
+            : apiType(apiType), windowWidth(windowWidth), windowHeight(windowHeight), windowTitle(windowTitle),
+              targetFPS(targetFPS), cameraCenter(cameraCenter), cameraTarget(cameraTarget), upDirection(upDirection),
+              renderSpeedRatio(renderSpeedRatio), particleOffset(particleOffset), particleScale(particleScale),
+              mouseSensitivity(mouseSensitivity), pitchLimitDegree(pitchLimitDegree),
+              cameraMoveSpeedStride(cameraMoveSpeedStride), initialSpeedNTimesStride(initialSpeedNTimesStride), isGraphicsAPIDebugMode(isGraphicsAPIDebugMode) {}
 }

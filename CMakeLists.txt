@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 4.0)
 set(EXECUTABLE_NAME "RendererOptiX")
 
-#CACHE PATH会将路径写入缓存文件，修改后需要删除所有CMake缓存并重新生成
+#CACHE PATH会将路径写入缓存文件，修改路径后需要删除所有CMake缓存并重新生成
 
 #CUDA
 if (WIN32)
@@ -31,7 +31,7 @@ endif ()
 if (WIN32)
     set(CONFIG_VULKAN_DIR_DEFAULT "C:/VulkanSDK/1.4.321.1")
 else ()
-    set(CONFIG_VULKAN_DIR_DEFAULT "~/Public/vulkan-1.4.321.1/x86_64")
+    set(CONFIG_VULKAN_DIR_DEFAULT "~/Public/vulkan-1.4.328.1/x86_64")
 endif ()
 
 #VTK
@@ -141,7 +141,9 @@ file(GLOB_RECURSE SRCS
         "${CMAKE_SOURCE_DIR}/src/*.cpp"
         "${CMAKE_SOURCE_DIR}/src/*.cu"
 )
-add_executable(${EXECUTABLE_NAME} ${SRCS})
+add_executable(${EXECUTABLE_NAME} ${SRCS}
+        include/Global/RendererTime.cuh
+        src/Global/RendererTime.cu)
 
 #确保在链接主程序之前，所有PTX文件都已生成
 add_dependencies(${EXECUTABLE_NAME} OPTIX_SHADERS)

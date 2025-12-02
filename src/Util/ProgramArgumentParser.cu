@@ -39,7 +39,7 @@ namespace project {
     }
 
     std::tuple<
-            GeometryData, MaterialData, Renderer::RenderLoopData,
+            GeometryData, MaterialData, RenderLoopData,
             std::vector<std::array<float, 12>>,
             std::string, std::string, std::string, bool, bool, size_t
     > ProgramArgumentParser::parseProgramArguments() {
@@ -120,7 +120,7 @@ namespace project {
             const auto initialSpeedRatio = loopData["camera-initial-speed-ratio"].get<size_t>();
             const auto isDebugMode = data.at("debug-mode").get<bool>();
 
-            const Renderer::RenderLoopData retLoopData(
+            const RenderLoopData retLoopData(
                     apiType,
                     windowWidth, windowHeight, "RendererOptiX",
                     targetFPS,

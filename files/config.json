@@ -1,8 +1,8 @@
 {
   "series-path": "../files/",
-  "series-name": "particle_mesh-short.vtk.series",
+  "series-name": "particle.vtk.series",
   "cache-path": "../cache/",
-  "cache": false,
+  "cache": true,
   "debug-mode": false,
   "cache-process-thread-count": 8,
   "roughs": [
